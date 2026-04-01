@@ -27,6 +27,14 @@ export default function ChatMode() {
 }
 
 function CustomerChat() {
+  const [input, setInput] = useState('');
+  
+  const handleSend = () => {
+    if (input.trim()) {
+      setInput('');
+    }
+  };
+
   return (
     <div className="flex-1 flex overflow-hidden p-8 gap-8">
       {/* Left: Upload & Persona */}
@@ -139,11 +147,19 @@ function CustomerChat() {
         <div className="p-6 border-t border-white/10">
           <div className="bg-surface-hover rounded-lg p-2 flex items-end gap-2 focus-within:ring-1 ring-primary/50">
             <textarea 
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
               className="flex-1 bg-transparent border-none focus:ring-0 text-sm resize-none h-12 py-3 px-2 outline-none" 
               placeholder="输入访谈问题，深度挖掘客户真实心智..."
             ></textarea>
             <button className="p-3 text-gray-400 hover:text-white"><Mic size={20} /></button>
-            <button className="p-3 bg-primary text-black rounded hover:bg-primary/90"><Send size={20} /></button>
+            <button onClick={handleSend} className="p-3 bg-primary text-black rounded hover:bg-primary/90"><Send size={20} /></button>
           </div>
         </div>
       </div>
@@ -152,6 +168,15 @@ function CustomerChat() {
 }
 
 function ExpertChat() {
+  const [input, setInput] = useState('');
+  const [filters, setFilters] = useState({ f1: true, f2: true, f3: false });
+  
+  const handleSend = () => {
+    if (input.trim()) {
+      setInput('');
+    }
+  };
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden p-8">
       <div className="flex-1 overflow-y-auto space-y-8 pr-4">
@@ -222,6 +247,14 @@ function ExpertChat() {
       <div className="mt-8 max-w-4xl mx-auto w-full">
         <div className="bg-surface-hover rounded-xl p-4 border-l-2 border-primary shadow-lg">
           <textarea 
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
             className="w-full bg-transparent border-none focus:ring-0 text-sm resize-none h-20 mb-2 outline-none" 
             placeholder="向专家智能体提问，例如：分析下一季度整车供应链风险..."
           ></textarea>
@@ -236,13 +269,13 @@ function ExpertChat() {
                 <div className="flex items-center gap-2 px-3 py-1.5 bg-surface rounded border border-white/10">
                   <span className="text-[10px] text-gray-400 font-bold">知识范围</span>
                   <label className="flex items-center gap-1 text-[10px] text-gray-300 cursor-pointer">
-                    <input type="checkbox" defaultChecked className="rounded bg-surface-hover border-none text-primary focus:ring-0 w-3 h-3" /> 洞察报告
+                    <input type="checkbox" checked={filters.f1} onChange={e => setFilters({...filters, f1: e.target.checked})} className="rounded bg-surface-hover border-none text-primary focus:ring-0 w-3 h-3" /> 洞察报告
                   </label>
                   <label className="flex items-center gap-1 text-[10px] text-gray-300 cursor-pointer">
-                    <input type="checkbox" defaultChecked className="rounded bg-surface-hover border-none text-primary focus:ring-0 w-3 h-3" /> 整车知识
+                    <input type="checkbox" checked={filters.f2} onChange={e => setFilters({...filters, f2: e.target.checked})} className="rounded bg-surface-hover border-none text-primary focus:ring-0 w-3 h-3" /> 整车知识
                   </label>
                   <label className="flex items-center gap-1 text-[10px] text-gray-300 cursor-pointer">
-                    <input type="checkbox" className="rounded bg-surface-hover border-none text-primary focus:ring-0 w-3 h-3" /> 行业知识
+                    <input type="checkbox" checked={filters.f3} onChange={e => setFilters({...filters, f3: e.target.checked})} className="rounded bg-surface-hover border-none text-primary focus:ring-0 w-3 h-3" /> 行业知识
                   </label>
                 </div>
                 <div className="flex items-center gap-2 px-3 py-1.5 bg-surface rounded border border-white/10">
@@ -253,7 +286,7 @@ function ExpertChat() {
                 </div>
               </div>
             </div>
-            <button className="w-10 h-10 bg-primary text-black rounded-full flex items-center justify-center hover:bg-primary/90">
+            <button onClick={handleSend} className="w-10 h-10 bg-primary text-black rounded-full flex items-center justify-center hover:bg-primary/90">
               <Send size={18} className="ml-1" />
             </button>
           </div>

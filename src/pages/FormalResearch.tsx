@@ -18,6 +18,8 @@ export default function FormalResearch() {
 }
 
 function StepStart({ onNext }: { onNext: () => void }) {
+  const [text, setText] = useState('');
+
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-8 relative">
       <div className="w-full max-w-4xl relative z-10">
@@ -33,6 +35,8 @@ function StepStart({ onNext }: { onNext: () => void }) {
           </div>
           <div className="px-8 pb-12">
             <textarea 
+              value={text}
+              onChange={e => setText(e.target.value)}
               className="w-full bg-transparent border-none focus:ring-0 text-xl text-white placeholder:text-gray-600 resize-none h-32 outline-none"
               placeholder="请提出任何关于人类行为和决策制定的商业问题。我们将对驱动真实选择的主观因素进行建模。"
             ></textarea>
@@ -55,6 +59,26 @@ function StepStart({ onNext }: { onNext: () => void }) {
 }
 
 function StepVerify({ onNext }: { onNext: () => void }) {
+  const [selectedAudience, setSelectedAudience] = useState('科技先行者');
+  const [selectedCompetitors, setSelectedCompetitors] = useState<string[]>(['BMW iX / Audi e-tron', 'Polestar 3 / 4']);
+
+  const toggleCompetitor = (comp: string) => {
+    if (selectedCompetitors.includes(comp)) {
+      setSelectedCompetitors(selectedCompetitors.filter(c => c !== comp));
+    } else {
+      setSelectedCompetitors([...selectedCompetitors, comp]);
+    }
+  };
+
+  const audiences = [
+    { id: '豪华车主转换型', desc: '目前驾驶 BBA，对纯电 SUV 有升级意愿' },
+    { id: '科技先行者', desc: '关注辅助驾驶与极简主义人机交互的极客' },
+    { id: '中产家庭增购', desc: '注重空间安全与北欧生活方式的年轻家庭' },
+    { id: '环保/极简主义者', desc: '对可持续材料有极致要求的环保倡导者' },
+  ];
+
+  const competitors = ['BMW iX / Audi e-tron', 'Polestar 3 / 4', 'NIO ES7 / ES8'];
+
   return (
     <div className="flex-1 overflow-y-auto p-12">
       <div className="max-w-4xl mx-auto space-y-12 pb-32">
@@ -71,22 +95,16 @@ function StepVerify({ onNext }: { onNext: () => void }) {
             <h3 className="text-xl font-bold mb-4">核心调研受众细分 (单选)</h3>
             <p className="text-gray-400 text-sm mb-6">您希望本次调研重点关注哪一类潜客群体？这将决定后续调研问卷的侧重逻辑。</p>
             <div className="grid grid-cols-2 gap-4">
-              <button className="p-4 border border-white/10 text-left hover:bg-white/5 transition-colors">
-                <div className="font-bold mb-1">豪华车主转换型</div>
-                <div className="text-xs text-gray-500">目前驾驶 BBA，对纯电 SUV 有升级意愿</div>
-              </button>
-              <button className="p-4 border border-primary bg-primary/10 text-left">
-                <div className="font-bold text-primary mb-1">科技先行者</div>
-                <div className="text-xs text-primary/70">关注辅助驾驶与极简主义人机交互的极客</div>
-              </button>
-              <button className="p-4 border border-white/10 text-left hover:bg-white/5 transition-colors">
-                <div className="font-bold mb-1">中产家庭增购</div>
-                <div className="text-xs text-gray-500">注重空间安全与北欧生活方式的年轻家庭</div>
-              </button>
-              <button className="p-4 border border-white/10 text-left hover:bg-white/5 transition-colors">
-                <div className="font-bold mb-1">环保/极简主义者</div>
-                <div className="text-xs text-gray-500">对可持续材料有极致要求的环保倡导者</div>
-              </button>
+              {audiences.map(aud => (
+                <button 
+                  key={aud.id}
+                  onClick={() => setSelectedAudience(aud.id)}
+                  className={`p-4 text-left transition-colors ${selectedAudience === aud.id ? 'border border-primary bg-primary/10' : 'border border-white/10 hover:bg-white/5'}`}
+                >
+                  <div className={`font-bold mb-1 ${selectedAudience === aud.id ? 'text-primary' : ''}`}>{aud.id}</div>
+                  <div className={`text-xs ${selectedAudience === aud.id ? 'text-primary/70' : 'text-gray-500'}`}>{aud.desc}</div>
+                </button>
+              ))}
             </div>
           </div>
         </div>
@@ -101,9 +119,18 @@ function StepVerify({ onNext }: { onNext: () => void }) {
           <div className="bg-surface p-8 border-l-2 border-primary shadow-lg">
             <h3 className="text-xl font-bold mb-4">竞争基准对标车型 (多选)</h3>
             <div className="grid grid-cols-3 gap-4">
-              <button className="p-4 border border-primary bg-primary/10 text-center font-bold text-primary">BMW iX / Audi e-tron</button>
-              <button className="p-4 border border-primary bg-primary/10 text-center font-bold text-primary">Polestar 3 / 4</button>
-              <button className="p-4 border border-white/10 text-center font-bold hover:bg-white/5">NIO ES7 / ES8</button>
+              {competitors.map(comp => {
+                const isSelected = selectedCompetitors.includes(comp);
+                return (
+                  <button 
+                    key={comp}
+                    onClick={() => toggleCompetitor(comp)}
+                    className={`p-4 text-center font-bold transition-colors ${isSelected ? 'border border-primary bg-primary/10 text-primary' : 'border border-white/10 hover:bg-white/5 text-white'}`}
+                  >
+                    {comp}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -123,6 +150,44 @@ function StepVerify({ onNext }: { onNext: () => void }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function InteractiveInput({ placeholder }: { placeholder: string }) {
+  const [val, setVal] = useState('');
+  const [status, setStatus] = useState<'idle' | 'loading' | 'success'>('idle');
+
+  const handleSubmit = () => {
+    if (!val.trim() || status !== 'idle') return;
+    setStatus('loading');
+    setTimeout(() => {
+      setStatus('success');
+      setTimeout(() => {
+        setStatus('idle');
+        setVal('');
+      }, 2000);
+    }, 1000);
+  };
+
+  return (
+    <div className="relative">
+      <input 
+        type="text" 
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+        disabled={status !== 'idle'}
+        placeholder={status === 'loading' ? '正在处理指令...' : status === 'success' ? '已成功应用！' : placeholder} 
+        className="w-full bg-white/5 border-none rounded p-3 text-sm focus:ring-1 focus:ring-primary outline-none disabled:opacity-50 transition-all" 
+      />
+      <button 
+        onClick={handleSubmit}
+        disabled={status !== 'idle'}
+        className="absolute right-3 top-1/2 -translate-y-1/2 text-primary hover:text-white disabled:opacity-50"
+      >
+        {status === 'success' ? <CheckCircle2 size={16} className="text-primary" /> : <Mic size={16} />}
+      </button>
     </div>
   );
 }
@@ -165,10 +230,7 @@ function StepThreeColumn({ onNext }: { onNext: () => void }) {
             </div>
           </div>
           <div className="p-4 border-t border-white/10">
-            <div className="relative">
-              <input type="text" placeholder="微调方案指令..." className="w-full bg-white/5 border-none rounded p-3 text-sm focus:ring-1 focus:ring-primary outline-none" />
-              <Mic className="absolute right-3 top-1/2 -translate-y-1/2 text-primary" size={16} />
-            </div>
+            <InteractiveInput placeholder="微调方案指令..." />
           </div>
         </div>
 
@@ -189,10 +251,7 @@ function StepThreeColumn({ onNext }: { onNext: () => void }) {
             </div>
           </div>
           <div className="p-4 border-t border-white/10">
-            <div className="relative">
-              <input type="text" placeholder="微调大纲逻辑..." className="w-full bg-white/5 border-none rounded p-3 text-sm focus:ring-1 focus:ring-primary outline-none" />
-              <Mic className="absolute right-3 top-1/2 -translate-y-1/2 text-primary" size={16} />
-            </div>
+            <InteractiveInput placeholder="微调大纲逻辑..." />
           </div>
         </div>
 
@@ -226,10 +285,7 @@ function StepThreeColumn({ onNext }: { onNext: () => void }) {
             </div>
           </div>
           <div className="p-4 border-t border-white/10">
-            <div className="relative">
-              <input type="text" placeholder="修改人群权重..." className="w-full bg-white/5 border-none rounded p-3 text-sm focus:ring-1 focus:ring-primary outline-none" />
-              <Mic className="absolute right-3 top-1/2 -translate-y-1/2 text-primary" size={16} />
-            </div>
+            <InteractiveInput placeholder="修改人群权重..." />
           </div>
         </div>
       </div>
@@ -238,6 +294,18 @@ function StepThreeColumn({ onNext }: { onNext: () => void }) {
 }
 
 function StepAudience({ onNext }: { onNext: () => void }) {
+  const [filters, setFilters] = useState({
+    f1: true,
+    f2: true,
+    f3: false
+  });
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  const handleRegenerate = () => {
+    setIsGenerating(true);
+    setTimeout(() => setIsGenerating(false), 1500);
+  };
+
   const radarData = [
     { subject: '人口与成长轨迹', A: 80, fullMark: 100 },
     { subject: '心理动因', A: 90, fullMark: 100 },
@@ -272,12 +340,24 @@ function StepAudience({ onNext }: { onNext: () => void }) {
             <div className="space-y-4">
               <div>
                 <div className="text-xs text-gray-500 mb-2">基本属性</div>
-                <label className="flex items-center gap-2 text-sm mb-2"><input type="checkbox" defaultChecked className="text-primary bg-white/10 border-none rounded-sm" /> 一线城市精英</label>
-                <label className="flex items-center gap-2 text-sm mb-2"><input type="checkbox" defaultChecked className="text-primary bg-white/10 border-none rounded-sm" /> 家庭用户 (3-5口)</label>
-                <label className="flex items-center gap-2 text-sm mb-2"><input type="checkbox" className="text-primary bg-white/10 border-none rounded-sm" /> 高净值资产持有</label>
+                <label className="flex items-center gap-2 text-sm mb-2 cursor-pointer">
+                  <input type="checkbox" checked={filters.f1} onChange={e => setFilters({...filters, f1: e.target.checked})} className="text-primary bg-white/10 border-none rounded-sm focus:ring-0" /> 一线城市精英
+                </label>
+                <label className="flex items-center gap-2 text-sm mb-2 cursor-pointer">
+                  <input type="checkbox" checked={filters.f2} onChange={e => setFilters({...filters, f2: e.target.checked})} className="text-primary bg-white/10 border-none rounded-sm focus:ring-0" /> 家庭用户 (3-5口)
+                </label>
+                <label className="flex items-center gap-2 text-sm mb-2 cursor-pointer">
+                  <input type="checkbox" checked={filters.f3} onChange={e => setFilters({...filters, f3: e.target.checked})} className="text-primary bg-white/10 border-none rounded-sm focus:ring-0" /> 高净值资产持有
+                </label>
               </div>
             </div>
-            <button className="w-full bg-primary text-black py-3 text-xs font-bold mt-6">重新生成画像</button>
+            <button 
+              onClick={handleRegenerate} 
+              disabled={isGenerating} 
+              className="w-full bg-primary text-black py-3 text-xs font-bold mt-6 disabled:opacity-50 transition-all"
+            >
+              {isGenerating ? '正在重新生成...' : '重新生成画像'}
+            </button>
           </div>
           <div className="bg-surface p-6">
             <h3 className="text-sm font-bold mb-4">样本统计</h3>
