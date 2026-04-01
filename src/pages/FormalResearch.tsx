@@ -1,8 +1,8 @@
-import { useState } from 'react';
-import { Command, Paperclip, Mic, ArrowRight, CheckCircle2, Upload, FileText, Share2, Download, User } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Command, Paperclip, Mic, ArrowRight, Upload, FileText, Share2, Download, User } from 'lucide-react';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer } from 'recharts';
 
-export default function FormalResearch() {
+export default function FormalResearch({ isSidebarCollapsed = false }: { isSidebarCollapsed?: boolean }) {
   const [step, setStep] = useState(1);
 
   return (
@@ -19,6 +19,27 @@ export default function FormalResearch() {
 
 function StepStart({ onNext }: { onNext: () => void }) {
   const [text, setText] = useState('');
+  const uploadRef = useRef<HTMLInputElement>(null);
+
+  const handleVoiceInput = () => {
+    const SpeechRecognitionCtor =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognitionCtor) {
+      window.alert('当前浏览器不支持语音输入');
+      return;
+    }
+    const recognition = new SpeechRecognitionCtor();
+    recognition.lang = 'zh-CN';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.onresult = (event: any) => {
+      const transcript = event.results?.[0]?.[0]?.transcript ?? '';
+      if (transcript) {
+        setText((prev) => `${prev}${prev ? '\n' : ''}${transcript}`);
+      }
+    };
+    recognition.start();
+  };
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-8 relative">
@@ -28,12 +49,22 @@ function StepStart({ onNext }: { onNext: () => void }) {
           <h2 className="text-4xl font-extrabold text-white">开始您的研究</h2>
         </div>
         <div className="bg-surface rounded-xl border border-white/10 overflow-hidden shadow-2xl">
-          <div className="flex justify-end p-4">
-            <button className="text-primary text-xs font-bold flex items-center gap-1 hover:underline">
-              ✨ 需要帮助澄清您的想法？
-            </button>
-          </div>
-          <div className="px-8 pb-12">
+          <input
+            ref={uploadRef}
+            type="file"
+            accept=".pdf,application/pdf"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              if (file.type !== 'application/pdf') {
+                window.alert('请上传 PDF 文件');
+                return;
+              }
+              setText((prev) => `${prev}${prev ? '\n' : ''}[已上传PDF] ${file.name}`);
+            }}
+          />
+          <div className="px-8 pt-10 pb-12">
             <textarea 
               value={text}
               onChange={e => setText(e.target.value)}
@@ -41,11 +72,13 @@ function StepStart({ onNext }: { onNext: () => void }) {
               placeholder="请提出任何关于人类行为和决策制定的商业问题。我们将对驱动真实选择的主观因素进行建模。"
             ></textarea>
           </div>
-          <div className="bg-white/5 p-4 flex justify-between items-center">
-            <button className="text-gray-400 hover:text-white p-2"><Paperclip size={20} /></button>
+          <div className="bg-white/5 p-4 flex justify-end items-center">
             <div className="flex items-center gap-4">
-              <button className="text-gray-400 hover:text-white flex items-center gap-2 text-xs font-bold">
-                <Mic size={16} /> 点击开始
+              <button onClick={() => uploadRef.current?.click()} className="text-gray-400 hover:text-white p-2" title="上传PDF">
+                <Paperclip size={20} />
+              </button>
+              <button onClick={handleVoiceInput} className="text-gray-400 hover:text-white p-2" title="语音输入">
+                <Mic size={18} />
               </button>
               <button onClick={onNext} className="bg-primary text-black px-8 py-3 rounded-lg font-bold flex items-center gap-2 hover:bg-primary/90">
                 开始研究 <ArrowRight size={18} />
@@ -59,135 +92,192 @@ function StepStart({ onNext }: { onNext: () => void }) {
 }
 
 function StepVerify({ onNext }: { onNext: () => void }) {
-  const [selectedAudience, setSelectedAudience] = useState('科技先行者');
-  const [selectedCompetitors, setSelectedCompetitors] = useState<string[]>(['BMW iX / Audi e-tron', 'Polestar 3 / 4']);
+  type Question = { id: string; mode: 'single' | 'multi'; title: string; options: string[] };
+  const questions: Question[] = [
+    { id: 'q1', mode: 'single', title: '核心调研受众细分（单选）', options: ['豪华车主转换型', '科技先行者', '中产家庭增购', '环保/极简主义者'] },
+    { id: 'q2', mode: 'multi', title: '竞争基准对标车型（多选）', options: ['BMW iX / Audi e-tron', 'Polestar 3 / 4', 'NIO ES7 / ES8'] },
+    { id: 'q3', mode: 'single', title: '研究地域优先级（单选）', options: ['北欧', '中国一线城市', '北美', '东南亚'] },
+    { id: 'q4', mode: 'multi', title: '关键评价维度（多选）', options: ['安全感知', '智能座舱体验', '可持续材料', '品牌价值认同'] },
+    { id: 'q5', mode: 'single', title: '输出报告风格（单选）', options: ['高层摘要', '策略详版', '数据导向'] },
+  ];
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [answers, setAnswers] = useState<Record<string, string[]>>({});
+  const [isThinking, setIsThinking] = useState(false);
 
-  const toggleCompetitor = (comp: string) => {
-    if (selectedCompetitors.includes(comp)) {
-      setSelectedCompetitors(selectedCompetitors.filter(c => c !== comp));
-    } else {
-      setSelectedCompetitors([...selectedCompetitors, comp]);
-    }
+  const current = questions[currentIndex];
+  const currentPicked = answers[current?.id] ?? [];
+  const isDone = currentIndex >= questions.length;
+
+  const submitAnswer = (picked: string[]) => {
+    if (!current) return;
+    setAnswers((prev) => ({ ...prev, [current.id]: picked }));
+    setIsThinking(true);
+    setTimeout(() => {
+      setIsThinking(false);
+      setCurrentIndex((prev) => prev + 1);
+    }, 700);
   };
 
-  const audiences = [
-    { id: '豪华车主转换型', desc: '目前驾驶 BBA，对纯电 SUV 有升级意愿' },
-    { id: '科技先行者', desc: '关注辅助驾驶与极简主义人机交互的极客' },
-    { id: '中产家庭增购', desc: '注重空间安全与北欧生活方式的年轻家庭' },
-    { id: '环保/极简主义者', desc: '对可持续材料有极致要求的环保倡导者' },
-  ];
-
-  const competitors = ['BMW iX / Audi e-tron', 'Polestar 3 / 4', 'NIO ES7 / ES8'];
+  const toggleMulti = (option: string) => {
+    if (!current) return;
+    const set = new Set(currentPicked);
+    if (set.has(option)) set.delete(option);
+    else set.add(option);
+    setAnswers((prev) => ({ ...prev, [current.id]: Array.from(set) }));
+  };
 
   return (
     <div className="flex-1 overflow-y-auto p-12">
-      <div className="max-w-4xl mx-auto space-y-12 pb-32">
-        <h2 className="text-2xl font-bold text-white mb-8">正式研究 - 动态核验</h2>
-        
-        <div className="space-y-6">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-primary/20 flex items-center justify-center rounded">
-              <span className="text-primary text-sm font-bold">1</span>
-            </div>
-            <span className="text-xs font-bold text-primary">Volvo Insight AI</span>
-          </div>
-          <div className="bg-surface p-8 border-l-2 border-primary shadow-lg">
-            <h3 className="text-xl font-bold mb-4">核心调研受众细分 (单选)</h3>
-            <p className="text-gray-400 text-sm mb-6">您希望本次调研重点关注哪一类潜客群体？这将决定后续调研问卷的侧重逻辑。</p>
-            <div className="grid grid-cols-2 gap-4">
-              {audiences.map(aud => (
-                <button 
-                  key={aud.id}
-                  onClick={() => setSelectedAudience(aud.id)}
-                  className={`p-4 text-left transition-colors ${selectedAudience === aud.id ? 'border border-primary bg-primary/10' : 'border border-white/10 hover:bg-white/5'}`}
-                >
-                  <div className={`font-bold mb-1 ${selectedAudience === aud.id ? 'text-primary' : ''}`}>{aud.id}</div>
-                  <div className={`text-xs ${selectedAudience === aud.id ? 'text-primary/70' : 'text-gray-500'}`}>{aud.desc}</div>
-                </button>
-              ))}
-            </div>
-          </div>
+      <div className="max-w-4xl mx-auto space-y-6">
+        <div className="bg-surface p-6 rounded-xl border border-white/10">
+          <div className="text-xs text-primary font-bold mb-2">Volvo Insight AI</div>
+          <p className="text-sm text-gray-300">我已完成对你输入信息的初步解析。接下来我会逐题核验关键参数，请按顺序回答。</p>
         </div>
 
-        <div className="space-y-6">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-primary/20 flex items-center justify-center rounded">
-              <span className="text-primary text-sm font-bold">2</span>
+        {questions.slice(0, currentIndex).map((q, idx) => (
+          <div key={q.id} className="space-y-3">
+            <div className="text-xs text-primary font-bold">问题 {idx + 1}</div>
+            <div className="bg-surface p-5 rounded-xl border border-white/10">
+              <div className="text-sm font-bold mb-3">{q.title}</div>
+              <div className="space-y-2">
+                {q.options.map((option) => {
+                  const selected = (answers[q.id] ?? []).includes(option);
+                  return (
+                    <div
+                      key={option}
+                      className={`p-3 text-sm rounded border ${
+                        selected ? 'border-primary bg-primary/10 text-primary' : 'border-white/10 text-gray-300'
+                      }`}
+                    >
+                      {option}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-            <span className="text-xs font-bold text-primary">Volvo Insight AI</span>
           </div>
-          <div className="bg-surface p-8 border-l-2 border-primary shadow-lg">
-            <h3 className="text-xl font-bold mb-4">竞争基准对标车型 (多选)</h3>
-            <div className="grid grid-cols-3 gap-4">
-              {competitors.map(comp => {
-                const isSelected = selectedCompetitors.includes(comp);
-                return (
-                  <button 
-                    key={comp}
-                    onClick={() => toggleCompetitor(comp)}
-                    className={`p-4 text-center font-bold transition-colors ${isSelected ? 'border border-primary bg-primary/10 text-primary' : 'border border-white/10 hover:bg-white/5 text-white'}`}
+        ))}
+
+        {!isDone && (
+          <div className="space-y-3">
+            <div className="text-xs text-primary font-bold">问题 {currentIndex + 1}</div>
+            <div className="bg-surface p-6 rounded-xl border border-primary/40">
+              <div className="text-sm font-bold mb-4">{current.title}</div>
+              <div className="grid grid-cols-2 gap-3">
+                {current.options.map((option) => {
+                  const selected = currentPicked.includes(option);
+                  return (
+                    <button
+                      key={option}
+                      onClick={() => (current.mode === 'single' ? submitAnswer([option]) : toggleMulti(option))}
+                      className={`p-3 text-left rounded border transition-colors ${selected ? 'border-primary bg-primary/10 text-primary' : 'border-white/10 hover:bg-white/5'}`}
+                    >
+                      {option}
+                    </button>
+                  );
+                })}
+              </div>
+              {current.mode === 'multi' && (
+                <div className="mt-4 flex justify-end">
+                  <button
+                    onClick={() => submitAnswer(currentPicked)}
+                    disabled={currentPicked.length === 0}
+                    className="bg-primary text-black px-5 py-2 rounded font-bold disabled:opacity-50"
                   >
-                    {comp}
+                    确认本题
                   </button>
-                );
-              })}
+                </div>
+              )}
             </div>
           </div>
-        </div>
-      </div>
+        )}
 
-      <div className="fixed bottom-0 right-0 left-64 bg-background/90 backdrop-blur-md p-8 border-t border-white/10">
-        <div className="max-w-4xl mx-auto flex justify-between items-center">
-          <div>
-            <div className="text-[10px] text-primary font-bold mb-2">核验进度</div>
-            <div className="flex items-center gap-4">
-              <div className="w-48 h-1 bg-white/10"><div className="w-3/4 h-full bg-primary"></div></div>
-              <span className="text-xs font-bold">75% 完成度</span>
-            </div>
+        {isThinking && (
+          <div className="bg-surface p-4 rounded-xl border border-white/10 text-sm text-gray-300 flex items-center gap-3">
+            <span className="w-2 h-2 bg-primary rounded-full animate-pulse"></span>
+            AI 正在思考并生成下一题...
           </div>
-          <button onClick={onNext} className="bg-primary text-black px-8 py-3 font-bold flex items-center gap-2 hover:bg-primary/90">
-            生成初步方案 <ArrowRight size={18} />
-          </button>
-        </div>
+        )}
+
+        {isDone && !isThinking && (
+          <div className="bg-surface p-6 rounded-xl border border-white/10 flex items-center justify-between">
+            <div>
+              <div className="text-sm font-bold">动态核验已完成</div>
+              <div className="text-xs text-gray-400 mt-1">5/5 题已确认，系统将进入下一阶段。</div>
+            </div>
+            <button onClick={onNext} className="bg-primary text-black px-8 py-3 font-bold flex items-center gap-2 hover:bg-primary/90">
+              生成初步方案 <ArrowRight size={18} />
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function InteractiveInput({ placeholder }: { placeholder: string }) {
-  const [val, setVal] = useState('');
-  const [status, setStatus] = useState<'idle' | 'loading' | 'success'>('idle');
+function EditablePanel({
+  placeholder,
+  initialContent = '',
+}: {
+  placeholder: string;
+  initialContent?: string;
+}) {
+  const [content, setContent] = useState(initialContent);
+  const [input, setInput] = useState('');
+  const [isSending, setIsSending] = useState(false);
 
-  const handleSubmit = () => {
-    if (!val.trim() || status !== 'idle') return;
-    setStatus('loading');
+  const handleVoiceInput = () => {
+    const SpeechRecognitionCtor =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognitionCtor) {
+      window.alert('当前浏览器不支持语音输入');
+      return;
+    }
+    const recognition = new SpeechRecognitionCtor();
+    recognition.lang = 'zh-CN';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.onresult = (event: any) => {
+      const transcript = event.results?.[0]?.[0]?.transcript ?? '';
+      if (transcript) setInput((prev) => `${prev}${prev ? ' ' : ''}${transcript}`);
+    };
+    recognition.start();
+  };
+
+  const handleSend = () => {
+    const text = input.trim();
+    if (!text || isSending) return;
+    setIsSending(true);
     setTimeout(() => {
-      setStatus('success');
-      setTimeout(() => {
-        setStatus('idle');
-        setVal('');
-      }, 2000);
-    }, 1000);
+      setContent(`${content}\n\n[AI 根据指令更新] ${text}`);
+      setInput('');
+      setIsSending(false);
+    }, 450);
   };
 
   return (
-    <div className="relative">
-      <input 
-        type="text" 
-        value={val}
-        onChange={(e) => setVal(e.target.value)}
-        onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-        disabled={status !== 'idle'}
-        placeholder={status === 'loading' ? '正在处理指令...' : status === 'success' ? '已成功应用！' : placeholder} 
-        className="w-full bg-white/5 border-none rounded p-3 text-sm focus:ring-1 focus:ring-primary outline-none disabled:opacity-50 transition-all" 
-      />
-      <button 
-        onClick={handleSubmit}
-        disabled={status !== 'idle'}
-        className="absolute right-3 top-1/2 -translate-y-1/2 text-primary hover:text-white disabled:opacity-50"
-      >
-        {status === 'success' ? <CheckCircle2 size={16} className="text-primary" /> : <Mic size={16} />}
-      </button>
+    <div className="p-4 border-t border-white/10">
+      {initialContent ? <div className="text-xs text-gray-400 mb-3 whitespace-pre-line">{content}</div> : null}
+      <div className="bg-white/5 rounded p-2 flex items-center gap-2">
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+          placeholder={placeholder}
+          className="flex-1 bg-transparent border-none rounded p-2 text-sm focus:ring-1 focus:ring-primary outline-none"
+        />
+        <button onClick={handleVoiceInput} className="text-gray-400 hover:text-white p-2" title="语音输入">
+          <Mic size={16} />
+        </button>
+        <button
+          onClick={handleSend}
+          disabled={isSending || !input.trim()}
+          className="px-3 py-2 text-xs font-bold bg-primary text-black rounded disabled:opacity-50"
+        >
+          发送
+        </button>
+      </div>
     </div>
   );
 }
@@ -195,24 +285,10 @@ function InteractiveInput({ placeholder }: { placeholder: string }) {
 function StepThreeColumn({ onNext }: { onNext: () => void }) {
   return (
     <div className="flex-1 flex flex-col p-8 overflow-hidden">
-      <div className="flex justify-between items-end mb-8">
-        <div>
-          <h2 className="text-3xl font-extrabold text-white">三位一体调研计划</h2>
-          <div className="flex items-center gap-2 mt-2">
-            <span className="w-2 h-2 bg-primary rounded-full animate-pulse"></span>
-            <span className="text-xs text-gray-400 font-bold">准备执行</span>
-          </div>
-        </div>
-        <button onClick={onNext} className="bg-primary text-black px-8 py-3 font-bold flex items-center gap-2 hover:bg-primary/90">
-          开始执行 <ArrowRight size={18} />
-        </button>
-      </div>
-
       <div className="flex-1 grid grid-cols-3 gap-6 overflow-hidden">
         {/* Col 1 */}
         <div className="bg-surface rounded-xl flex flex-col overflow-hidden">
           <div className="p-6 flex-1 overflow-y-auto">
-            <div className="text-[10px] text-primary font-bold mb-6">第一阶段</div>
             <h3 className="text-2xl font-bold mb-6">调研方案</h3>
             <div className="space-y-4">
               <div className="p-4 bg-white/5 border-l-2 border-primary">
@@ -229,15 +305,14 @@ function StepThreeColumn({ onNext }: { onNext: () => void }) {
               </div>
             </div>
           </div>
-          <div className="p-4 border-t border-white/10">
-            <InteractiveInput placeholder="微调方案指令..." />
-          </div>
+          <EditablePanel
+            placeholder="微调方案指令..."
+          />
         </div>
 
         {/* Col 2 */}
         <div className="bg-surface rounded-xl flex flex-col overflow-hidden">
           <div className="p-6 flex-1 overflow-y-auto">
-            <div className="text-[10px] text-primary font-bold mb-6">第二阶段</div>
             <h3 className="text-2xl font-bold mb-6">访谈大纲</h3>
             <div className="space-y-6">
               <div className="border-b border-white/10 pb-4">
@@ -250,15 +325,20 @@ function StepThreeColumn({ onNext }: { onNext: () => void }) {
               </div>
             </div>
           </div>
-          <div className="p-4 border-t border-white/10">
-            <InteractiveInput placeholder="微调大纲逻辑..." />
-          </div>
+          <EditablePanel
+            placeholder="微调大纲逻辑..."
+          />
         </div>
 
         {/* Col 3 */}
         <div className="bg-surface rounded-xl flex flex-col overflow-hidden">
-          <div className="p-6 flex-1 overflow-y-auto">
-            <div className="text-[10px] text-primary font-bold mb-6">第三阶段</div>
+          <div className="p-6 flex-1 overflow-y-auto relative">
+            <button
+              onClick={onNext}
+              className="absolute top-0 right-0 mt-2 mr-2 px-3 py-1 text-xs bg-primary text-black hover:bg-primary/90 rounded font-bold"
+            >
+              查看人设详情
+            </button>
             <h3 className="text-2xl font-bold mb-6">人群选择</h3>
             <div className="grid grid-cols-2 gap-4 mb-6">
               <div className="bg-white/5 p-4 aspect-square flex flex-col justify-end relative overflow-hidden">
@@ -284,9 +364,6 @@ function StepThreeColumn({ onNext }: { onNext: () => void }) {
               <div className="flex justify-between text-xs"><span className="text-gray-500">置信度</span><span className="font-bold text-primary">98.4%</span></div>
             </div>
           </div>
-          <div className="p-4 border-t border-white/10">
-            <InteractiveInput placeholder="修改人群权重..." />
-          </div>
         </div>
       </div>
     </div>
@@ -294,103 +371,178 @@ function StepThreeColumn({ onNext }: { onNext: () => void }) {
 }
 
 function StepAudience({ onNext }: { onNext: () => void }) {
-  const [filters, setFilters] = useState({
-    f1: true,
-    f2: true,
-    f3: false
-  });
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [profiles, setProfiles] = useState([
+    { id: 'c1', name: '理性先锋型', tags: ['高净值', '智驾优先', '效率导向'], users: '128+ users', voc: '542+ VOC' },
+    { id: 'c2', name: '家庭安全型', tags: ['家庭用户', '空间诉求', '安全敏感'], users: '106+ users', voc: '497+ VOC' },
+    { id: 'c3', name: '环保极简型', tags: ['可持续偏好', '极简审美', '材质敏感'], users: '94+ users', voc: '451+ VOC' },
+    { id: 'c4', name: '科技尝鲜型', tags: ['数字原生', '功能探索', '社媒活跃'], users: '113+ users', voc: '533+ VOC' },
+    { id: 'c5', name: '品牌认同型', tags: ['品牌价值', '长期主义', '口碑驱动'], users: '102+ users', voc: '468+ VOC' },
+  ]);
+  const [selectedProfileId, setSelectedProfileId] = useState('c1');
+  const [tagInput, setTagInput] = useState('');
+  const [personas, setPersonas] = useState([
+    { id: 'p1', profileId: 'c1', name: '陈思远', tags: ['科技极客', '高净值'], score: 8.8, conf: 93, cdpTags: ['智驾优先', '高净值', '效率导向'], voc: '我希望车辆主动发现风险并接管平顺。', radar: [82, 90, 84, 76, 92, 95, 70] },
+    { id: 'p2', profileId: 'c1', name: '林沐然', tags: ['精致生活家', '安全控'], score: 9.1, conf: 95, cdpTags: ['家庭用户', '安全敏感', '材质关注'], voc: '环保材料不是口号，体验和质感必须同时在线。', radar: [80, 86, 88, 74, 94, 83, 79] },
+    { id: 'p2-1', profileId: 'c2', name: '周祺', tags: ['家庭安全', '空间导向'], score: 8.7, conf: 92, cdpTags: ['家庭用户', '空间诉求', '安全敏感'], voc: '后排空间和主动安全是我购车决策第一优先级。', radar: [84, 81, 78, 73, 93, 79, 88] },
+    { id: 'p3-1', profileId: 'c3', name: '许悠然', tags: ['环保主义', '极简'], score: 8.9, conf: 91, cdpTags: ['可持续偏好', '极简审美', '材质敏感'], voc: '我希望环保材料不仅环保，还要有高级触感和设计统一性。', radar: [79, 85, 90, 72, 89, 82, 76] },
+    { id: 'p3', profileId: 'c4', name: '张逸豪', tags: ['都市先锋', 'Z世代'], score: 9.3, conf: 96, cdpTags: ['数字原生', '尝鲜驱动', '社媒活跃'], voc: '我会先看真实测评，再决定是否愿意信任品牌叙事。', radar: [76, 95, 87, 90, 82, 97, 74] },
+    { id: 'p5-1', profileId: 'c5', name: '宋致远', tags: ['长期主义', '品牌认同'], score: 8.6, conf: 90, cdpTags: ['品牌价值', '长期主义', '口碑驱动'], voc: '我更看重品牌长期信誉和真实用户口碑，而非短期营销话术。', radar: [81, 83, 77, 75, 85, 78, 91] },
+  ]);
+  const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
 
-  const handleRegenerate = () => {
-    setIsGenerating(true);
-    setTimeout(() => setIsGenerating(false), 1500);
+  const selectedProfile = profiles.find((p) => p.id === selectedProfileId) ?? profiles[0];
+  const selectedPersona = personas.find((p) => p.id === selectedPersonaId) ?? null;
+  const filteredPersonas = personas.filter((p) => p.profileId === selectedProfileId || p.profileId === 'all');
+
+  const addTagToAllProfiles = () => {
+    const tag = tagInput.trim();
+    if (!tag) return;
+    setProfiles((prev) => prev.map((p) => (!p.tags.includes(tag) ? { ...p, tags: [...p.tags, tag] } : p)));
+    setTagInput('');
   };
 
-  const radarData = [
-    { subject: '人口与成长轨迹', A: 80, fullMark: 100 },
-    { subject: '心理动因', A: 90, fullMark: 100 },
-    { subject: '心理特征维度', A: 85, fullMark: 100 },
-    { subject: '行为维度', A: 70, fullMark: 100 },
-    { subject: '需求与痛点', A: 95, fullMark: 100 },
-    { subject: '技术接受度', A: 100, fullMark: 100 },
-    { subject: '社会关系', A: 60, fullMark: 100 },
-  ];
+  const generateNewProfiles = () => {
+    const suffix = `${profiles.length + 1}`;
+    setProfiles((prev) => [
+      ...prev,
+      {
+        id: `c-new-${Date.now()}`,
+        name: `新增画像${suffix}`,
+        tags: ['新增标签', '趋势洞察', '待验证'],
+        users: `${90 + prev.length * 3}+ users`,
+        voc: `${430 + prev.length * 12}+ VOC`,
+      },
+    ]);
+  };
+
+  const generatePersonas = () => {
+    const created = profiles.slice(0, 5).flatMap((profile, idx) => [
+      {
+        id: `gen-${profile.id}-a`,
+        profileId: profile.id,
+        name: `${profile.name}A`,
+        tags: [profile.tags[0] ?? '标签1', profile.tags[1] ?? '标签2'],
+        score: 8.4 + (idx % 3) * 0.4,
+        conf: 90 + (idx % 5),
+        cdpTags: profile.tags,
+        voc: `来自${profile.name}的代表性VOC：用户在决策中持续强调安全与体验平衡。`,
+        radar: [78 + idx, 84 + idx, 80 + idx, 74 + idx, 88 + idx, 90 + idx, 72 + idx],
+      },
+      {
+        id: `gen-${profile.id}-b`,
+        profileId: profile.id,
+        name: `${profile.name}B`,
+        tags: [profile.tags[1] ?? '标签1', '潜客行为'],
+        score: 8.2 + (idx % 4) * 0.3,
+        conf: 89 + (idx % 6),
+        cdpTags: profile.tags,
+        voc: `来自${profile.name}的代表性VOC：希望系统在复杂场景里提供低打扰高确定性反馈。`,
+        radar: [76 + idx, 82 + idx, 79 + idx, 77 + idx, 86 + idx, 91 + idx, 75 + idx],
+      },
+    ]);
+    setPersonas(created);
+  };
+
+  const radarData = selectedPersona
+    ? [
+        { subject: '人口与成长轨迹', A: selectedPersona.radar[0], fullMark: 100 },
+        { subject: '心理动因', A: selectedPersona.radar[1], fullMark: 100 },
+        { subject: '心理特征维度', A: selectedPersona.radar[2], fullMark: 100 },
+        { subject: '行为维度', A: selectedPersona.radar[3], fullMark: 100 },
+        { subject: '需求与痛点', A: selectedPersona.radar[4], fullMark: 100 },
+        { subject: '技术接受度', A: selectedPersona.radar[5], fullMark: 100 },
+        { subject: '社会关系', A: selectedPersona.radar[6], fullMark: 100 },
+      ]
+    : [];
 
   return (
     <div className="flex-1 overflow-y-auto p-10">
       <div className="flex justify-between items-end mb-8">
         <div>
-          <div className="text-primary text-xs font-bold mb-2">模块 04 / 细分市场分析</div>
           <h2 className="text-4xl font-extrabold text-white">人群画像调整</h2>
         </div>
         <div className="flex gap-4">
-          <button className="bg-white/10 px-6 py-3 text-sm font-bold hover:bg-white/20 transition-colors flex items-center gap-2">
-            <Download size={16} /> 导出分析报告
-          </button>
           <button onClick={onNext} className="bg-primary text-black px-6 py-3 text-sm font-bold hover:bg-primary/90 transition-colors flex items-center gap-2">
-            确认并继续 <ArrowRight size={16} />
+            开始执行 <ArrowRight size={16} />
           </button>
         </div>
       </div>
 
       <div className="grid grid-cols-12 gap-8">
-        <div className="col-span-3 space-y-6">
-          <div className="bg-surface p-6 border-l-2 border-primary">
-            <h3 className="text-sm font-bold text-primary mb-4">CDP 标签过滤</h3>
-            <div className="space-y-4">
-              <div>
-                <div className="text-xs text-gray-500 mb-2">基本属性</div>
-                <label className="flex items-center gap-2 text-sm mb-2 cursor-pointer">
-                  <input type="checkbox" checked={filters.f1} onChange={e => setFilters({...filters, f1: e.target.checked})} className="text-primary bg-white/10 border-none rounded-sm focus:ring-0" /> 一线城市精英
-                </label>
-                <label className="flex items-center gap-2 text-sm mb-2 cursor-pointer">
-                  <input type="checkbox" checked={filters.f2} onChange={e => setFilters({...filters, f2: e.target.checked})} className="text-primary bg-white/10 border-none rounded-sm focus:ring-0" /> 家庭用户 (3-5口)
-                </label>
-                <label className="flex items-center gap-2 text-sm mb-2 cursor-pointer">
-                  <input type="checkbox" checked={filters.f3} onChange={e => setFilters({...filters, f3: e.target.checked})} className="text-primary bg-white/10 border-none rounded-sm focus:ring-0" /> 高净值资产持有
-                </label>
-              </div>
+        <div className="col-span-5 space-y-6">
+          <div className="bg-surface p-6 rounded-xl">
+            <h3 className="text-sm font-bold text-primary mb-4">自动匹配的 CDP 画像</h3>
+            <div className="space-y-3">
+              {profiles.map((profile) => {
+                const active = selectedProfileId === profile.id;
+                return (
+                  <button
+                    key={profile.id}
+                    onClick={() => setSelectedProfileId(profile.id)}
+                    className={`w-full text-left p-4 rounded border transition-colors ${active ? 'border-primary bg-primary/10' : 'border-white/10 hover:bg-white/5'}`}
+                  >
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="font-bold">{profile.name}</span>
+                      <span className="text-[10px] text-primary">{profile.users}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {profile.tags.map((tag) => (
+                        <span key={tag} className="px-2 py-1 rounded bg-surface-hover text-xs text-gray-300">{tag}</span>
+                      ))}
+                    </div>
+                    <div className="text-[11px] text-gray-500">{profile.voc}</div>
+                  </button>
+                );
+              })}
             </div>
-            <button 
-              onClick={handleRegenerate} 
-              disabled={isGenerating} 
-              className="w-full bg-primary text-black py-3 text-xs font-bold mt-6 disabled:opacity-50 transition-all"
-            >
-              {isGenerating ? '正在重新生成...' : '重新生成画像'}
-            </button>
           </div>
-          <div className="bg-surface p-6">
-            <h3 className="text-sm font-bold mb-4">样本统计</h3>
-            <div className="flex gap-4">
-              <div className="bg-white/5 p-4 flex-1">
-                <div className="text-2xl font-bold text-primary">128</div>
-                <div className="text-[10px] text-gray-500">匹配用户</div>
-              </div>
-              <div className="bg-white/5 p-4 flex-1">
-                <div className="text-2xl font-bold text-blue-400">542</div>
-                <div className="text-[10px] text-gray-500">VOC 声音数</div>
-              </div>
+
+          <div className="bg-surface p-6 rounded-xl">
+            <h3 className="text-sm font-bold mb-4">新增画像</h3>
+            <div className="flex flex-wrap gap-2 mb-4">
+              {selectedProfile.tags.map((tag) => (
+                <span key={tag} className="px-2 py-1 rounded bg-surface-hover text-xs text-primary">{tag}</span>
+              ))}
             </div>
+            <div className="flex gap-2">
+              <input
+                value={tagInput}
+                onChange={(e) => setTagInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addTagToAllProfiles()}
+                placeholder="新增 CDP 标签（将应用到所有画像）..."
+                className="flex-1 bg-surface-hover border border-white/10 rounded p-2 text-sm outline-none"
+              />
+              <button onClick={addTagToAllProfiles} className="px-4 py-2 bg-primary text-black rounded text-sm font-bold">添加</button>
+            </div>
+            <button onClick={generateNewProfiles} className="w-full mt-4 bg-primary text-black py-2 rounded text-sm font-bold">
+              生成新画像
+            </button>
+            <button onClick={generatePersonas} className="w-full mt-3 bg-surface-hover text-white py-2 rounded text-sm font-bold hover:bg-white/10">
+              根据当前画像生成模拟人设
+            </button>
           </div>
         </div>
 
-        <div className="col-span-9 space-y-6">
-          <div className="bg-surface flex min-h-[400px]">
-            <div className="w-2/5 relative">
-              <img src="https://i.pravatar.cc/500?img=11" className="w-full h-full object-cover grayscale" />
-              <div className="absolute inset-0 bg-gradient-to-t from-black to-transparent"></div>
-              <div className="absolute bottom-8 left-8">
-                <h3 className="text-3xl font-bold text-white">理性先锋型</h3>
-                <div className="text-primary text-xs mt-2">画像编号: PR-2024-X1</div>
+        <div className="col-span-7 space-y-6">
+          {selectedPersona ? (
+            <div className="bg-surface p-6 rounded-xl">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-xl font-bold">{selectedPersona.name} - 详情</h3>
+                <button onClick={() => setSelectedPersonaId(null)} className="text-xs text-gray-400 hover:text-white">返回卡片列表</button>
               </div>
-            </div>
-            <div className="flex-1 p-8">
-              <div className="text-xs text-gray-500 mb-2">关键特征</div>
-              <p className="text-sm leading-relaxed mb-6">
-                高度关注技术参数与实际效能的结合。在购车决策中，他们不仅看重品牌带来的社会认同，更看重车辆在智能驾驶、安全冗余等方面的硬核实力。对“伪需求”有极强的辨识能力。
-              </p>
-              
-              <div className="h-64 w-full">
+              <div className="mb-4">
+                <div className="text-xs text-gray-500 mb-2">CDP 标签</div>
+                <div className="flex flex-wrap gap-2">
+                  {selectedPersona.cdpTags.map((tag) => (
+                    <span key={tag} className="px-2 py-1 rounded bg-surface-hover text-xs text-primary">{tag}</span>
+                  ))}
+                </div>
+              </div>
+              <div className="mb-4">
+                <div className="text-xs text-gray-500 mb-2">VOC 原始文本</div>
+                <div className="p-3 bg-white/5 border-l-2 border-primary text-sm text-gray-300">{selectedPersona.voc}</div>
+              </div>
+              <div className="h-72">
                 <ResponsiveContainer width="100%" height="100%">
                   <RadarChart cx="50%" cy="50%" outerRadius="80%" data={radarData}>
                     <PolarGrid stroke="#333" />
@@ -401,21 +553,24 @@ function StepAudience({ onNext }: { onNext: () => void }) {
                 </ResponsiveContainer>
               </div>
             </div>
-          </div>
-
-          <div className="bg-surface p-6">
-            <h3 className="text-sm font-bold mb-4">VOC 原始洞察</h3>
-            <div className="space-y-4">
-              <div className="p-4 bg-white/5 border-l-2 border-blue-400">
-                <p className="text-sm text-gray-300 italic">"我不需要车里有那么多花哨的屏幕，我需要的是在高速上它能比我更早发现危险，并且接管得足够平顺。"</p>
-                <div className="text-[10px] text-gray-500 mt-2">— 摘自 2023.11 用户深度访谈</div>
-              </div>
-              <div className="p-4 bg-white/5 border-l-2 border-primary">
-                <p className="text-sm text-gray-300 italic">"环保不是一个口号，如果内饰材料真的做到了零甲醛且触感高级，我愿意为此支付溢价。"</p>
-                <div className="text-[10px] text-gray-500 mt-2">— 摘自 社交媒体声量分析</div>
+          ) : (
+            <div className="bg-surface p-6 rounded-xl">
+              <h3 className="text-sm font-bold mb-4">模拟生成的人设卡片（可点击查看详情）</h3>
+              <div className="grid grid-cols-2 gap-4">
+                {filteredPersonas.map((p) => (
+                  <button key={p.id} onClick={() => setSelectedPersonaId(p.id)} className="bg-white/5 p-4 rounded text-left hover:bg-white/10 transition-colors">
+                    <h4 className="text-lg font-bold mb-2">{p.name}</h4>
+                    <div className="flex gap-2 mb-4">
+                      <span className="px-2 py-1 bg-blue-500/20 text-blue-400 text-xs rounded">{p.tags[0]}</span>
+                      <span className="px-2 py-1 bg-surface-hover text-gray-300 text-xs rounded">{p.tags[1]}</span>
+                    </div>
+                    <div className="text-xs text-gray-400 mb-1">五维评分：<span className="text-white font-bold">{p.score.toFixed(1)}</span></div>
+                    <div className="text-xs text-gray-400">置信度：<span className="text-white font-bold">{p.conf}%</span></div>
+                  </button>
+                ))}
               </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>
@@ -423,16 +578,44 @@ function StepAudience({ onNext }: { onNext: () => void }) {
 }
 
 function StepConfirm({ onNext }: { onNext: () => void }) {
+  const uploadRef = useRef<HTMLInputElement>(null);
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
+
+  const onPickPdf = (file: File | null) => {
+    if (!file) return;
+    if (file.type !== 'application/pdf') {
+      window.alert('仅支持 PDF 文件');
+      return;
+    }
+    setPdfFile(file);
+  };
+
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-8">
       <div className="w-full max-w-2xl bg-surface p-10 rounded-xl text-center shadow-2xl">
         <h2 className="text-3xl font-extrabold text-white mb-4">确认执行方案</h2>
         <p className="text-gray-400 text-sm mb-10">系统已准备好基于上述设定生成深度调研报告。您还可以选择上传真实的调研材料以增强报告的实证性。</p>
         
-        <div className="border-2 border-dashed border-white/20 rounded-xl p-12 flex flex-col items-center justify-center hover:border-primary/50 transition-colors cursor-pointer mb-10">
+        <input
+          ref={uploadRef}
+          type="file"
+          accept=".pdf,application/pdf"
+          className="hidden"
+          onChange={(e) => onPickPdf(e.target.files?.[0] ?? null)}
+        />
+        <div
+          className="border-2 border-dashed border-white/20 rounded-xl p-12 flex flex-col items-center justify-center hover:border-primary/50 transition-colors cursor-pointer mb-10"
+          onClick={() => uploadRef.current?.click()}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault();
+            onPickPdf(e.dataTransfer.files?.[0] ?? null);
+          }}
+        >
           <Upload className="text-primary mb-4" size={40} />
           <p className="text-white font-bold mb-2">上传真人调研材料 (可选)</p>
-          <p className="text-gray-500 text-xs">支持 PDF, DOCX, CSV 格式，最大 100MB</p>
+          <p className="text-gray-500 text-xs">仅支持 PDF 格式，最大 100MB</p>
+          {pdfFile && <p className="text-xs text-primary mt-2">已选择：{pdfFile.name}</p>}
         </div>
 
         <div className="flex gap-4 justify-center">
@@ -449,19 +632,38 @@ function StepConfirm({ onNext }: { onNext: () => void }) {
 }
 
 function StepReport() {
+  const handleDownloadPdf = () => {
+    const reportText = `2024 纯电豪华 SUV 潜客心智与决策动因研究
+
+核心执行摘要
+- 用户核心诉求从机械性能转向数字安全与情绪价值。
+- 主动安全与隐私保护对购买意愿影响显著。
+
+关键人群洞察：理性先锋型
+- 决策前期高强度参数比对，后期由价值观认同决定最终选择。
+`;
+    const blob = new Blob([reportText], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'report-detail.pdf';
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="flex-1 overflow-y-auto p-10">
       <div className="max-w-5xl mx-auto">
         <div className="flex justify-between items-end mb-8">
           <div>
-            <div className="text-primary text-xs font-bold mb-2">最终交付物</div>
+            <div className="text-primary text-xs font-bold mb-2">报告详情</div>
             <h2 className="text-4xl font-extrabold text-white">商业调研分析报告</h2>
           </div>
           <div className="flex gap-4">
             <button className="bg-white/10 px-6 py-3 text-sm font-bold hover:bg-white/20 transition-colors flex items-center gap-2">
               <Share2 size={16} /> 分享报告
             </button>
-            <button className="bg-primary text-black px-6 py-3 text-sm font-bold hover:bg-primary/90 transition-colors flex items-center gap-2">
+            <button onClick={handleDownloadPdf} className="bg-primary text-black px-6 py-3 text-sm font-bold hover:bg-primary/90 transition-colors flex items-center gap-2">
               <Download size={16} /> 下载 PDF
             </button>
           </div>

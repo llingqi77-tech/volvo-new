@@ -1,5 +1,22 @@
-import { useState } from 'react';
-import { Upload, Bot, User, Send, Mic, FileText, CheckCircle2, Download, Share2, Paperclip, Image as ImageIcon } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Upload, Bot, User, Send, Mic, CheckCircle2, Download } from 'lucide-react';
+import * as pdfjsLib from 'pdfjs-dist';
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+
+type ChatMessage = {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+};
+
+type InterviewStep = {
+  id: string;
+  question: string;
+  options: string[];
+  selected?: string;
+};
 
 export default function ChatMode() {
   const [chatType, setChatType] = useState<'expert' | 'customer'>('customer');
@@ -28,141 +45,287 @@ export default function ChatMode() {
 
 function CustomerChat() {
   const [input, setInput] = useState('');
-  
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [isPresetPreview] = useState(false);
+  const [isParsing, setIsParsing] = useState(false);
+  const [personaIntro, setPersonaIntro] = useState(
+    '你好，我是王静仪，32岁，策略总监。我的决策逻辑非常明确：优先考虑安全冗余和信息效率，而不是功能堆砌。每天通勤时间长、决策压力大，所以我希望车机系统能够主动过滤噪声信息、提供低打扰但高确定性的辅助体验。如果一辆车能在“安全感、静谧感、信任感”三点上持续稳定，我会愿意长期使用并向同事推荐。',
+  );
+  const [personaName, setPersonaName] = useState('王静仪');
+  const [personaRole, setPersonaRole] = useState('32岁，策略总监');
+  const [personaCoreDrive, setPersonaCoreDrive] = useState('追求高效决策与工作生活平衡，对智能驾驶安全性高度敏感。');
+  const [personaAesthetic, setPersonaAesthetic] = useState('北欧极简');
+  const [personaPriceSensitivity, setPersonaPriceSensitivity] = useState('低（价值导向）');
+  const [customerMessages, setCustomerMessages] = useState<ChatMessage[]>([
+    { id: 'c-a-1', role: 'assistant', text: '你好，我已准备好开始访谈。你可以先上传 PDF，或先提问。' },
+  ]);
+  const [interviewSteps, setInterviewSteps] = useState<InterviewStep[]>([
+    {
+      id: 's1',
+      question: '你希望本次访谈优先聚焦哪类场景？',
+      options: ['通勤出行体验', '家庭周末出行', '长途高速驾驶'],
+    },
+    {
+      id: 's2',
+      question: '你最关注智能座舱哪部分价值？',
+      options: ['信息效率', '安全辅助', '情绪舒缓'],
+    },
+    {
+      id: 's3',
+      question: '你对品牌沟通方式更认可哪种？',
+      options: ['技术参数证明', '真实用户故事', '第三方评测背书'],
+    },
+  ]);
+  const [activeStepIndex, setActiveStepIndex] = useState(0);
+  const uploadRef = useRef<HTMLInputElement>(null);
+  const customerBottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    customerBottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [customerMessages]);
+ 
   const handleSend = () => {
-    if (input.trim()) {
-      setInput('');
+    const question = input.trim();
+    if (!question) return;
+    setCustomerMessages((prev) => [...prev, { id: `c-u-${Date.now()}`, role: 'user', text: question }]);
+    setInput('');
+    setTimeout(() => {
+      const analysis = pdfFile
+        ? `分析中：我先从上传文档中定位与你问题“${question}”相关的行为动因与高频VOC片段。`
+        : `分析中：当前未上传PDF，我将先基于通用访谈方法对“${question}”做初步拆解。`;
+      setCustomerMessages((prev) => [...prev, { id: `c-a-analysis-${Date.now()}`, role: 'assistant', text: analysis }]);
+    }, 250);
+    setTimeout(() => {
+      const reply = pdfFile
+        ? `已结合「${pdfFile.name}」的解析内容。关于“${question}”，我认为关键点是先确认用户决策动因，再拆解场景中的核心痛点。`
+        : `收到。建议先上传 PDF 以获得更准确的人设访谈结果。针对“${question}”，我可以先给你通用访谈提纲。`;
+      setCustomerMessages((prev) => [...prev, { id: `c-a-${Date.now()}`, role: 'assistant', text: reply }]);
+    }, 650);
+  };
+
+  const handlePickOption = (stepIndex: number, option: string) => {
+    setInterviewSteps((prev) =>
+      prev.map((step, idx) => (idx === stepIndex ? { ...step, selected: option } : step)),
+    );
+    setCustomerMessages((prev) => [
+      ...prev,
+      { id: `c-u-opt-${Date.now()}`, role: 'user', text: `我选择：${option}` },
+      { id: `c-a-opt-analysis-${Date.now()}`, role: 'assistant', text: `分析中：已记录你对该题的选择“${option}”，正在结合上下文生成下一步问题。` },
+    ]);
+    setTimeout(() => {
+      setActiveStepIndex((prev) => Math.min(prev + 1, interviewSteps.length));
+      setCustomerMessages((prev) => [
+        ...prev,
+        { id: `c-a-opt-next-${Date.now()}`, role: 'assistant', text: '好的，继续下一题。' },
+      ]);
+    }, 450);
+  };
+
+  const extractPdfText = async (file: File) => {
+    const buffer = await file.arrayBuffer();
+    const task = pdfjsLib.getDocument({ data: buffer });
+    const pdf = await task.promise;
+    const maxPages = Math.min(pdf.numPages, 3);
+    const chunks: string[] = [];
+    for (let pageNum = 1; pageNum <= maxPages; pageNum += 1) {
+      const page = await pdf.getPage(pageNum);
+      const content = await page.getTextContent();
+      const text = content.items
+        .map((item: any) => ('str' in item ? item.str : ''))
+        .join(' ')
+        .trim();
+      if (text) chunks.push(text);
+    }
+    return chunks.join(' ').slice(0, 1200);
+  };
+
+  const onPickPdf = async (file: File | null) => {
+    if (!file) return;
+    if (file.type !== 'application/pdf') {
+      window.alert('请上传 PDF 文件');
+      return;
+    }
+    setIsParsing(true);
+    try {
+      const text = await extractPdfText(file);
+      const snippet = text || '未提取到足够文本，已根据文档元信息完成基础画像。';
+      setPdfFile(file);
+      setPersonaName(file.name.replace(/\.pdf$/i, '').slice(0, 18) || '你的客户画像');
+      setPersonaRole('文档解析生成画像');
+      setPersonaCoreDrive('基于上传文档自动识别的核心动因，偏好高确定性的产品体验。');
+      setPersonaAesthetic('简约务实');
+      setPersonaPriceSensitivity('中低');
+      setPersonaIntro(`你好，我是基于你上传文档生成的人设智能体。我的特征摘要：${snippet.slice(0, 120)}...`);
+      setCustomerMessages((prev) => [
+        ...prev,
+        { id: `c-a-pdf-analysis-${Date.now()}`, role: 'assistant', text: `分析中：正在抽取「${file.name}」中的人物画像线索与VOC证据...` },
+        { id: `c-a-pdf-${Date.now()}`, role: 'assistant', text: `PDF 解析完成：${file.name}。你现在可以开始深度访谈。` },
+      ]);
+    } catch {
+      window.alert('PDF 解析失败，请更换文档重试');
+    } finally {
+      setIsParsing(false);
     }
   };
 
   return (
     <div className="flex-1 flex overflow-hidden p-8 gap-8">
-      {/* Left: Upload & Persona */}
-      <div className="w-1/3 flex flex-col gap-6">
-        <div className="bg-surface p-8 rounded-xl">
-          <h2 className="text-2xl font-bold text-white mb-2">建立客户智能体</h2>
-          <p className="text-gray-400 text-sm mb-6">上传 PDF 调研报告或访谈记录，系统将精密提取关键人格特征，生成动态智能体。</p>
-          
-          <div className="border-2 border-dashed border-white/20 rounded-xl p-10 flex flex-col items-center justify-center text-center hover:border-primary/50 transition-colors cursor-pointer mb-6">
-            <Upload className="text-primary mb-4" size={32} />
-            <p className="text-white font-bold mb-1">点击或拖拽 PDF 文件至此</p>
-            <p className="text-gray-500 text-xs">支持最大 50MB 的文档解析</p>
-          </div>
+      <input
+        ref={uploadRef}
+        type="file"
+        accept=".pdf,application/pdf"
+        className="hidden"
+        onChange={(e) => onPickPdf(e.target.files?.[0] ?? null)}
+      />
 
-          <div className="space-y-2">
-            <div className="flex justify-between text-xs font-bold">
-              <span className="text-primary">正在深度解析语义层...</span>
-              <span className="text-white">78%</span>
-            </div>
-            <div className="h-1 bg-surface-hover rounded-full overflow-hidden">
-              <div className="h-full bg-primary w-[78%]"></div>
-            </div>
-            <div className="flex gap-2 mt-2">
-              <span className="px-2 py-1 bg-blue-500/20 text-blue-400 text-[10px] rounded">NLP 分析</span>
-              <span className="px-2 py-1 bg-blue-500/20 text-blue-400 text-[10px] rounded">情感建模</span>
-              <span className="px-2 py-1 bg-blue-500/20 text-blue-400 text-[10px] rounded">逻辑聚类</span>
+      {!pdfFile && !isPresetPreview ? (
+        <div className="w-full flex flex-col">
+          <div className="flex-1 flex items-center justify-center">
+            <div className="w-full max-w-3xl p-10 text-center">
+              <p className="text-3xl font-bold text-white">访谈你的客户</p>
+              <p className="text-sm text-gray-400 mt-3">访谈你的客户，深度了解客户痛点</p>
             </div>
           </div>
-        </div>
-
-        <div className="bg-surface p-6 rounded-xl relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-4 opacity-10">
-            <User size={80} />
-          </div>
-          <h3 className="text-xl font-bold text-white mb-4">王静仪 (32岁, 策略总监)</h3>
-          <div className="space-y-4 relative z-10">
-            <div>
-              <span className="text-[10px] text-gray-500">核心驱动力</span>
-              <p className="text-sm mt-1">追求极致的效率与工作生活平衡，对智能驾驶系统的安全性有极高敏感度。</p>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-surface-hover p-3 rounded">
-                <span className="text-[10px] text-gray-500 block mb-1">审美倾向</span>
-                <span className="text-white text-xs font-bold">斯堪的纳维亚极简</span>
-              </div>
-              <div className="bg-surface-hover p-3 rounded">
-                <span className="text-[10px] text-gray-500 block mb-1">价格敏感度</span>
-                <span className="text-white text-xs font-bold">低 (价值导向)</span>
-              </div>
-            </div>
-          </div>
-          <button className="w-full mt-6 py-3 bg-surface-hover text-white text-sm font-bold rounded hover:bg-[#353534] transition-colors">
-            编辑详细参数
-          </button>
-        </div>
-      </div>
-
-      {/* Right: Chat */}
-      <div className="flex-1 bg-surface rounded-xl flex flex-col overflow-hidden">
-        <div className="px-6 py-4 bg-surface-hover flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <div className="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
-            <div>
-              <h4 className="text-sm font-bold text-white">与 "王静仪" 智能体深度对话</h4>
-              <p className="text-[10px] text-gray-400">基于《2023都市女性高净值调研报告》生成</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          <div className="flex gap-4 max-w-[80%]">
-            <div className="w-10 h-10 rounded bg-primary/20 flex items-center justify-center shrink-0">
-              <Bot className="text-primary" size={20} />
-            </div>
-            <div>
-              <div className="bg-surface-hover p-4 rounded-lg text-sm leading-relaxed">
-                你好。我已经准备好基于你上传的调研数据进行模拟访谈。你可以询问我关于购车决策、品牌偏好或对沃尔沃未来智能交互系统的看法。我们从哪里开始？
-              </div>
-            </div>
-          </div>
-          
-          <div className="flex gap-4 max-w-[80%] ml-auto flex-row-reverse">
-            <div className="w-10 h-10 rounded bg-white/10 flex items-center justify-center shrink-0">
-              <User className="text-white" size={20} />
-            </div>
-            <div>
-              <div className="bg-primary text-black p-4 rounded-lg text-sm leading-relaxed">
-                作为一名繁忙的策略总监，你在通勤路上最希望智能座舱能解决什么痛点？
-              </div>
-            </div>
-          </div>
-
-          <div className="flex gap-4 max-w-[80%]">
-            <div className="w-10 h-10 rounded bg-primary/20 flex items-center justify-center shrink-0">
-              <Bot className="text-primary" size={20} />
-            </div>
-            <div>
-              <div className="bg-surface-hover p-4 rounded-lg text-sm leading-relaxed mb-2">
-                对我来说，痛点在于“信息的有效性”而非“信息的丰富性”。在早晚高峰，我并不需要大屏幕上的视频或游戏，我更希望车辆能像私人助理一样，精准预判我的日程变化，并主动过滤掉不必要的通知。<br/><br/>
-                理想的状态是：当我坐进车内，座舱环境能迅速从“战斗模式”切换为“静谧空间”，通过灯光和气味帮助我完成从高压工作到家庭角色的心理过渡。
-              </div>
-              <div className="flex gap-2">
-                <button className="px-3 py-1 bg-surface-hover text-primary border border-primary/30 text-[10px] rounded">提取为洞察</button>
-                <button className="px-3 py-1 bg-surface-hover text-gray-400 text-[10px] rounded">重新生成</button>
+          <div className="mt-6 max-w-4xl mx-auto w-full">
+            <div className="bg-surface-hover rounded-xl p-4 border-l-2 border-primary shadow-lg">
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+                className="w-full bg-transparent border-none focus:ring-0 text-sm resize-none h-20 mb-2 outline-none"
+                placeholder="上传PDF，解析客户信息，和你的客户一对一访谈..."
+              />
+              <div className="flex justify-end items-center">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => uploadRef.current?.click()}
+                    className="w-10 h-10 bg-surface border border-white/10 text-gray-300 rounded-full flex items-center justify-center hover:text-white"
+                    title="上传 PDF"
+                  >
+                    <Upload size={16} />
+                  </button>
+                  <button onClick={handleSend} className="w-10 h-10 bg-primary text-black rounded-full flex items-center justify-center hover:bg-primary/90">
+                    <Send size={18} className="ml-1" />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         </div>
-
-        <div className="p-6 border-t border-white/10">
-          <div className="bg-surface-hover rounded-lg p-2 flex items-end gap-2 focus-within:ring-1 ring-primary/50">
-            <textarea 
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSend();
-                }
-              }}
-              className="flex-1 bg-transparent border-none focus:ring-0 text-sm resize-none h-12 py-3 px-2 outline-none" 
-              placeholder="输入访谈问题，深度挖掘客户真实心智..."
-            ></textarea>
-            <button className="p-3 text-gray-400 hover:text-white"><Mic size={20} /></button>
-            <button onClick={handleSend} className="p-3 bg-primary text-black rounded hover:bg-primary/90"><Send size={20} /></button>
+      ) : (
+        <>
+          <div className="w-1/3 bg-surface p-6 rounded-xl relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-4 opacity-10">
+              <User size={80} />
+            </div>
+            <div className="relative z-10">
+              <p className="text-xs text-primary font-bold mb-3">{isParsing ? '正在解析...' : '已完成解析'}</p>
+              <h3 className="text-xl font-bold text-white mb-1">{personaName}</h3>
+              <p className="text-xs text-gray-400 mb-1">{personaRole}</p>
+              <p className="text-xs text-gray-500 mb-4">来源文件：{pdfFile?.name ?? '预设示例画像.pdf'}</p>
+              <div className="space-y-4">
+                <div>
+                  <span className="text-[10px] text-gray-500">开场白</span>
+                  <p className="text-sm mt-1">{personaIntro}</p>
+                </div>
+                <div>
+                  <span className="text-[10px] text-gray-500">核心驱动力</span>
+                  <p className="text-sm mt-1">{personaCoreDrive}</p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-surface-hover p-3 rounded">
+                    <span className="text-[10px] text-gray-500 block mb-1">审美倾向</span>
+                    <span className="text-white text-xs font-bold">{personaAesthetic}</span>
+                  </div>
+                  <div className="bg-surface-hover p-3 rounded">
+                    <span className="text-[10px] text-gray-500 block mb-1">价格敏感度</span>
+                    <span className="text-white text-xs font-bold">{personaPriceSensitivity}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
+
+          <div className="flex-1 bg-surface rounded-xl flex flex-col overflow-hidden">
+            <div className="px-6 py-4 bg-surface-hover flex justify-between items-center">
+              <div className="flex items-center gap-3">
+                <div className="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
+                <div>
+                  <h4 className="text-sm font-bold text-white">与 "{personaName}" 深度对话</h4>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {interviewSteps.map((step, idx) => {
+                const show = idx <= activeStepIndex;
+                if (!show) return null;
+                const locked = !!step.selected || idx < activeStepIndex;
+                return (
+                  <div key={step.id} className="bg-surface-hover rounded-xl p-4 border border-white/10">
+                    <div className="text-sm font-bold mb-3">{step.question}</div>
+                    <div className="space-y-2">
+                      {step.options.map((option) => {
+                        const isSelected = step.selected === option;
+                        return (
+                          <button
+                            key={option}
+                            onClick={() => !locked && handlePickOption(idx, option)}
+                            disabled={locked}
+                            className={`w-full text-left px-3 py-2 rounded border text-sm transition-colors ${
+                              isSelected
+                                ? 'border-primary bg-primary/10 text-primary'
+                                : 'border-white/10 hover:bg-white/5 text-gray-200'
+                            } ${locked ? 'cursor-default' : ''}`}
+                          >
+                            {option}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {customerMessages.map((m) => (
+                <div key={m.id} className={`flex gap-4 w-full ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                  <div className={`w-10 h-10 rounded flex items-center justify-center shrink-0 ${m.role === 'user' ? 'bg-white/10' : 'bg-primary/20'}`}>
+                    {m.role === 'user' ? <User className="text-white" size={20} /> : <Bot className="text-primary" size={20} />}
+                  </div>
+                  <div className={`${m.role === 'user' ? 'bg-primary text-black' : 'bg-surface-hover'} p-4 rounded-lg text-sm leading-relaxed w-full`}>
+                    {m.text}
+                  </div>
+                </div>
+              ))}
+              <div ref={customerBottomRef}></div>
+            </div>
+
+            <div className="p-6 border-t border-white/10">
+              <div className="bg-surface-hover rounded-lg p-2 flex items-end gap-2 focus-within:ring-1 ring-primary/50">
+                <textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSend();
+                    }
+                  }}
+                  className="flex-1 bg-transparent border-none focus:ring-0 text-sm resize-y min-h-24 py-3 px-2 outline-none"
+                  placeholder="输入访谈问题，深度挖掘客户真实心智..."
+                ></textarea>
+                <button className="p-3 text-gray-400 hover:text-white"><Mic size={20} /></button>
+                <button onClick={handleSend} className="p-3 bg-primary text-black rounded hover:bg-primary/90"><Send size={20} /></button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -170,38 +333,78 @@ function CustomerChat() {
 function ExpertChat() {
   const [input, setInput] = useState('');
   const [filters, setFilters] = useState({ f1: true, f2: true, f3: false });
-  
+  const [isOnline, setIsOnline] = useState(true);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [hasStarted, setHasStarted] = useState(false);
+
   const handleSend = () => {
-    if (input.trim()) {
-      setInput('');
-    }
+    const question = input.trim();
+    if (!question) return;
+    setHasStarted(true);
+    setMessages((prev) => [...prev, { id: `e-u-${Date.now()}`, role: 'user', text: question }]);
+    setInput('');
+    setTimeout(() => {
+      const scope = [
+        filters.f1 ? '洞察报告' : null,
+        filters.f2 ? '整车知识' : null,
+        filters.f3 ? '行业知识' : null,
+      ].filter(Boolean).join('、') || '默认知识库';
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `e-a-${Date.now()}`,
+          role: 'assistant',
+          text: `收到。已基于${scope}${isOnline ? '并结合联网信息' : ''}分析“${question}”。建议先给出3个关键结论，再补充风险和执行建议。`,
+        },
+      ]);
+    }, 450);
+  };
+
+  const reportText = useMemo(
+    () =>
+      `2024 纯电 SUV 市场竞争力分析\n\n核心摘要：\n沃尔沃在2024年通过EX系列完成纯电平台升级，安全资产向数字安全能力迁移。\n\n核心功能点：\n- Lidar 全域感知增强\n- 可持续材料座舱工艺\n- 双电机全时效能管理\n`,
+    [],
+  );
+
+  const handleExportPdf = () => {
+    const blob = new Blob([reportText], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'expert-report.pdf';
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden p-8">
       <div className="flex-1 overflow-y-auto space-y-8 pr-4">
-        <div className="flex justify-end ml-24">
-          <div className="bg-surface-hover p-4 rounded-xl max-w-2xl text-sm leading-relaxed">
-            请基于最新的洞察报告，分析沃尔沃在2024年纯电豪华SUV市场的竞争态势，并生成一份核心摘要报告。
-          </div>
-        </div>
-
-        <div className="flex mr-24 gap-4">
-          <div className="w-10 h-10 rounded bg-primary flex items-center justify-center shrink-0">
-            <Bot className="text-black" size={20} />
-          </div>
-          <div className="space-y-4 flex-1">
-            <div className="text-sm leading-relaxed">
-              根据“2024全球豪华电动汽车洞察报告”及沃尔沃内部整车知识库，沃尔沃在纯电豪华SUV领域展现出极强的市场韧性。核心优势集中在安全系统的软件化定义（SDV）以及北欧极简美学驱动的数字化座舱体验。
+        {!hasStarted && (
+          <div className="h-full min-h-[360px] flex items-center justify-center">
+            <div className="max-w-2xl text-center">
+              <h2 className="text-3xl font-bold text-white mb-3">询问你的专属专家</h2>
+              <p className="text-sm text-gray-400">输入问题后，专家智能体会开始和你连续对话。</p>
             </div>
-            
-            <div className="bg-surface rounded-xl p-6 border border-white/5">
-              <div className="flex items-center gap-2 mb-4">
-                <FileText className="text-primary" size={16} />
-                <span className="text-[10px] font-bold text-primary">结构化分析报告</span>
+          </div>
+        )}
+
+        {hasStarted && (
+          <>
+            {messages.map((m) => (
+              <div key={m.id} className={`flex gap-4 ${m.role === 'user' ? 'justify-end ml-24' : 'mr-24'}`}>
+                {m.role === 'assistant' && (
+                  <div className="w-10 h-10 rounded bg-primary flex items-center justify-center shrink-0">
+                    <Bot className="text-black" size={20} />
+                  </div>
+                )}
+                <div className={`${m.role === 'user' ? 'bg-surface-hover max-w-2xl' : 'flex-1'} p-4 rounded-xl text-sm leading-relaxed`}>
+                  {m.text}
+                </div>
               </div>
+            ))}
+
+            <div className="bg-surface rounded-xl p-6 border border-white/5">
               <h2 className="text-xl font-bold mb-6">2024 纯电 SUV 市场竞争力分析</h2>
-              
               <div className="grid grid-cols-2 gap-4 mb-6">
                 <div className="bg-surface-hover p-5 rounded-lg">
                   <div className="text-xs text-gray-500 mb-2">核心摘要</div>
@@ -227,21 +430,16 @@ function ExpertChat() {
                   </ul>
                 </div>
               </div>
-              
               <div className="flex justify-between items-center pt-4 border-t border-white/10">
-                <span className="text-[10px] text-gray-500">Generated by Volvo Insight Intelligence • 2024.05.20</span>
                 <div className="flex gap-2">
-                  <button className="px-3 py-1.5 bg-surface-hover hover:bg-[#353534] text-xs rounded flex items-center gap-2">
+                  <button onClick={handleExportPdf} className="px-3 py-1.5 bg-surface-hover hover:bg-[#353534] text-xs rounded flex items-center gap-2">
                     <Download size={14} /> 导出 PDF
-                  </button>
-                  <button className="px-3 py-1.5 bg-surface-hover hover:bg-[#353534] text-xs rounded flex items-center gap-2">
-                    <Share2 size={14} /> 分享
                   </button>
                 </div>
               </div>
             </div>
-          </div>
-        </div>
+          </>
+        )}
       </div>
 
       <div className="mt-8 max-w-4xl mx-auto w-full">
@@ -260,30 +458,29 @@ function ExpertChat() {
           ></textarea>
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-4">
-              <div className="flex gap-2 text-gray-400">
-                <button className="hover:text-white"><Paperclip size={18} /></button>
-                <button className="hover:text-white"><ImageIcon size={18} /></button>
-              </div>
-              <div className="h-4 w-px bg-gray-600"></div>
               <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-surface rounded border border-white/10">
-                  <span className="text-[10px] text-gray-400 font-bold">知识范围</span>
-                  <label className="flex items-center gap-1 text-[10px] text-gray-300 cursor-pointer">
-                    <input type="checkbox" checked={filters.f1} onChange={e => setFilters({...filters, f1: e.target.checked})} className="rounded bg-surface-hover border-none text-primary focus:ring-0 w-3 h-3" /> 洞察报告
+                <div className="flex items-center gap-3 px-4 py-2 bg-surface rounded border border-white/10">
+                  <span className="text-xs text-gray-300 font-bold">知识范围</span>
+                  <label className="flex items-center gap-2 text-xs text-gray-200 cursor-pointer">
+                    <input type="checkbox" checked={filters.f1} onChange={e => setFilters({...filters, f1: e.target.checked})} className="rounded bg-surface-hover border-none text-primary focus:ring-0 w-3.5 h-3.5" /> 洞察报告
                   </label>
-                  <label className="flex items-center gap-1 text-[10px] text-gray-300 cursor-pointer">
-                    <input type="checkbox" checked={filters.f2} onChange={e => setFilters({...filters, f2: e.target.checked})} className="rounded bg-surface-hover border-none text-primary focus:ring-0 w-3 h-3" /> 整车知识
+                  <label className="flex items-center gap-2 text-xs text-gray-200 cursor-pointer">
+                    <input type="checkbox" checked={filters.f2} onChange={e => setFilters({...filters, f2: e.target.checked})} className="rounded bg-surface-hover border-none text-primary focus:ring-0 w-3.5 h-3.5" /> 整车知识
                   </label>
-                  <label className="flex items-center gap-1 text-[10px] text-gray-300 cursor-pointer">
-                    <input type="checkbox" checked={filters.f3} onChange={e => setFilters({...filters, f3: e.target.checked})} className="rounded bg-surface-hover border-none text-primary focus:ring-0 w-3 h-3" /> 行业知识
+                  <label className="flex items-center gap-2 text-xs text-gray-200 cursor-pointer">
+                    <input type="checkbox" checked={filters.f3} onChange={e => setFilters({...filters, f3: e.target.checked})} className="rounded bg-surface-hover border-none text-primary focus:ring-0 w-3.5 h-3.5" /> 行业知识
                   </label>
                 </div>
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-surface rounded border border-white/10">
-                  <span className="text-[10px] text-gray-400 font-bold">联网</span>
-                  <div className="w-6 h-3.5 bg-primary rounded-full relative">
-                    <div className="absolute right-0.5 top-0.5 w-2.5 h-2.5 bg-black rounded-full"></div>
+                <button
+                  type="button"
+                  onClick={() => setIsOnline((prev) => !prev)}
+                  className="flex items-center gap-3 px-4 py-2 bg-surface rounded border border-white/10"
+                >
+                  <span className="text-xs text-gray-300 font-bold">联网</span>
+                  <div className={`w-8 h-4 rounded-full relative transition-colors ${isOnline ? 'bg-primary' : 'bg-gray-600'}`}>
+                    <div className={`absolute top-0.5 w-3 h-3 bg-black rounded-full transition-all ${isOnline ? 'right-0.5' : 'left-0.5'}`}></div>
                   </div>
-                </div>
+                </button>
               </div>
             </div>
             <button onClick={handleSend} className="w-10 h-10 bg-primary text-black rounded-full flex items-center justify-center hover:bg-primary/90">

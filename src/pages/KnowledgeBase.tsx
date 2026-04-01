@@ -1,25 +1,65 @@
-import { useState } from 'react';
-import { Upload, Search, FileText, MoreVertical, TrendingUp, FolderOpen, FileUp } from 'lucide-react';
+import { Dispatch, SetStateAction, useRef, useState } from 'react';
+import { Upload, Search, FileText, TrendingUp, FolderOpen, FileUp } from 'lucide-react';
 import Modal from '../components/Modal';
+import type { KnowledgeDoc } from '../App';
 
-export default function KnowledgeBase() {
+export default function KnowledgeBase({
+  docs,
+  setDocs,
+}: {
+  docs: KnowledgeDoc[];
+  setDocs: Dispatch<SetStateAction<KnowledgeDoc[]>>;
+}) {
   const [activeCategory, setActiveCategory] = useState('全库文档');
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedUploadFile, setSelectedUploadFile] = useState<File | null>(null);
+  const [uploadCategory, setUploadCategory] = useState<'洞察报告库' | '整车知识库' | '行业知识库'>('洞察报告库');
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+
+  const onPickFile = (file: File | null) => {
+    if (!file) return;
+    if (file.type !== 'application/pdf') {
+      window.alert('当前仅支持上传 PDF 文件');
+      return;
+    }
+    setSelectedUploadFile(file);
+  };
 
   const categories = ['全库文档', '洞察报告库', '整车知识库', '行业知识库'];
 
-  const allDocs = [
-    { title: '2024年全球纯电SUV市场趋势深度调研', type: 'PDF • 14.2 MB • 2023-11-24', tags: ['电动化', 'SUV'], uploader: '王安德', color: 'text-primary', category: '洞察报告库' },
-    { title: 'Volvo EX90 智驾系统硬件拆解报告', type: 'PDF • 45.8 MB • 2023-11-20', tags: ['EX90', '智驾硬件'], uploader: '林索菲', color: 'text-blue-400', category: '整车知识库' },
-    { title: '欧洲固态电池产业链投资机遇分析', type: 'PDF • 8.1 MB • 2023-11-15', tags: ['固态电池', '欧洲市场'], uploader: '徐莱纳斯', color: 'text-gray-400', category: '行业知识库' },
-  ];
-
-  const filteredDocs = allDocs.filter(doc => {
+  const filteredDocs = docs.filter(doc => {
     const matchesCategory = activeCategory === '全库文档' || doc.category === activeCategory;
     const matchesSearch = doc.title.toLowerCase().includes(searchQuery.toLowerCase()) || doc.tags.some(t => t.toLowerCase().includes(searchQuery.toLowerCase()));
     return matchesCategory && matchesSearch;
   });
+
+  const handleDeleteDoc = (docId: string, title: string) => {
+    const shouldDelete = window.confirm(`确认删除文档「${title}」吗？`);
+    if (!shouldDelete) return;
+    setDocs((prev) => prev.filter((doc) => doc.id !== docId));
+  };
+
+  const handleUpload = () => {
+    if (!selectedUploadFile) return;
+    const now = new Date().toISOString().slice(0, 10);
+    const fileSizeMb = (selectedUploadFile.size / 1024 / 1024).toFixed(1);
+    setDocs((prev) => [
+      {
+        id: `doc-${Date.now()}`,
+        title: selectedUploadFile.name.replace(/\.pdf$/i, ''),
+        type: `PDF • ${fileSizeMb} MB • ${now}`,
+        tags: ['新上传'],
+        uploader: '当前用户',
+        color: 'text-primary',
+        category: uploadCategory,
+      },
+      ...prev,
+    ]);
+    setSelectedUploadFile(null);
+    setUploadCategory('洞察报告库');
+    setIsUploadModalOpen(false);
+  };
 
   return (
     <div className="p-10 max-w-7xl mx-auto">
@@ -96,7 +136,7 @@ export default function KnowledgeBase() {
         </div>
         <div className="divide-y divide-white/5">
           {filteredDocs.length > 0 ? filteredDocs.map((doc, i) => (
-            <div key={i} className="grid grid-cols-12 px-6 py-4 items-center hover:bg-white/5 transition-colors">
+            <div key={doc.id} className="grid grid-cols-12 px-6 py-4 items-center hover:bg-white/5 transition-colors">
               <div className="col-span-5 flex items-center gap-4">
                 <FileText className={doc.color} size={24} />
                 <div>
@@ -115,8 +155,20 @@ export default function KnowledgeBase() {
                 </div>
                 <span className="text-sm text-gray-300">{doc.uploader}</span>
               </div>
-              <div className="col-span-1 text-right">
-                <button className="text-gray-500 hover:text-white"><MoreVertical size={18} /></button>
+              <div className="col-span-1 flex items-center justify-end gap-2">
+                <button
+                  className="px-2 py-1 text-xs rounded bg-surface-hover text-gray-300 hover:text-white transition-colors"
+                  title="查看详情"
+                >
+                  查看详情
+                </button>
+                <button
+                  className="px-2 py-1 text-xs rounded bg-surface-hover text-gray-300 hover:text-red-400 transition-colors"
+                  title="删除文档"
+                  onClick={() => handleDeleteDoc(doc.id, doc.title)}
+                >
+                  删除
+                </button>
               </div>
             </div>
           )) : (
@@ -127,26 +179,42 @@ export default function KnowledgeBase() {
 
       <Modal isOpen={isUploadModalOpen} onClose={() => setIsUploadModalOpen(false)} title="上传新文档">
         <div className="space-y-4">
-          <div className="border-2 border-dashed border-white/20 rounded-xl p-8 flex flex-col items-center justify-center hover:border-primary/50 transition-colors cursor-pointer">
+          <input
+            ref={uploadInputRef}
+            type="file"
+            accept=".pdf,application/pdf"
+            className="hidden"
+            onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
+          />
+          <div
+            onClick={() => uploadInputRef.current?.click()}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              onPickFile(e.dataTransfer.files?.[0] ?? null);
+            }}
+            className="border-2 border-dashed border-white/20 rounded-xl p-8 flex flex-col items-center justify-center hover:border-primary/50 transition-colors cursor-pointer"
+          >
             <FileUp className="text-primary mb-3" size={32} />
-            <p className="text-white font-bold mb-1">点击或拖拽文件至此</p>
-            <p className="text-gray-500 text-xs">支持 PDF, DOCX, PPTX (最大 50MB)</p>
+            <p className="text-white font-bold mb-1">点击或拖拽 PDF 至此</p>
+            <p className="text-gray-500 text-xs">仅支持 PDF (最大 50MB)</p>
+            {selectedUploadFile && <p className="text-xs text-primary mt-2">已选择：{selectedUploadFile.name}</p>}
           </div>
           <div>
-            <label className="block text-xs font-bold text-gray-400 mb-2">文档分类</label>
-            <select className="w-full bg-surface-hover border border-white/10 rounded-lg p-3 text-sm text-white outline-none focus:border-primary">
-              <option>洞察报告库</option>
-              <option>整车知识库</option>
-              <option>行业知识库</option>
+            <label className="block text-xs font-bold text-gray-400 mb-2">文档归属</label>
+            <select
+              value={uploadCategory}
+              onChange={(e) => setUploadCategory(e.target.value as '洞察报告库' | '整车知识库' | '行业知识库')}
+              className="w-full bg-surface-hover border border-white/10 rounded-lg p-3 text-sm text-white outline-none focus:border-primary"
+            >
+              <option value="洞察报告库">洞察报告</option>
+              <option value="整车知识库">整车知识</option>
+              <option value="行业知识库">行业报告</option>
             </select>
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-gray-400 mb-2">添加标签 (回车确认)</label>
-            <input type="text" placeholder="输入标签..." className="w-full bg-surface-hover border border-white/10 rounded-lg p-3 text-sm text-white outline-none focus:border-primary" />
           </div>
           <div className="pt-4 flex justify-end gap-3">
             <button onClick={() => setIsUploadModalOpen(false)} className="px-6 py-2 rounded-lg text-sm font-bold text-gray-400 hover:text-white transition-colors">取消</button>
-            <button onClick={() => setIsUploadModalOpen(false)} className="px-6 py-2 rounded-lg text-sm font-bold bg-primary text-black hover:bg-primary/90 transition-colors">开始上传</button>
+            <button onClick={handleUpload} disabled={!selectedUploadFile} className="px-6 py-2 rounded-lg text-sm font-bold bg-primary text-black hover:bg-primary/90 transition-colors disabled:opacity-50">开始上传</button>
           </div>
         </div>
       </Modal>
