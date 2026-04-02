@@ -1,5 +1,5 @@
 import { Dispatch, SetStateAction, useRef, useState } from 'react';
-import { Upload, Search, FileText, TrendingUp, FolderOpen, FileUp, Folder } from 'lucide-react';
+import { Upload, Search, FileText, TrendingUp, FolderOpen, FileUp, Folder, ArrowLeft, Download, Share2, Calendar, User as UserIcon } from 'lucide-react';
 import Modal from '../components/Modal';
 import type { KnowledgeDoc } from '../App';
 
@@ -15,8 +15,19 @@ export default function KnowledgeBase({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedUploadFiles, setSelectedUploadFiles] = useState<File[]>([]);
   const [uploadCategory, setUploadCategory] = useState<'洞察报告库' | '整车知识库' | '行业知识库'>('洞察报告库');
+  const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+
+  const selectedDoc = docs.find(d => d.id === selectedDocId);
+
+  // 如果选中了文档，显示详情页
+  if (selectedDoc) {
+    return <DocumentDetail doc={selectedDoc} onBack={() => setSelectedDocId(null)} onDelete={(id) => {
+      setDocs(prev => prev.filter(d => d.id !== id));
+      setSelectedDocId(null);
+    }} />;
+  }
 
   const onPickFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -241,6 +252,7 @@ export default function KnowledgeBase({
               </div>
               <div className="col-span-1 flex items-center justify-end gap-2">
                 <button
+                  onClick={() => setSelectedDocId(doc.id)}
                   className="px-2 py-1 text-xs rounded bg-surface-hover text-gray-300 hover:text-white transition-colors"
                   title="查看详情"
                 >
@@ -375,6 +387,179 @@ export default function KnowledgeBase({
           </div>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+function DocumentDetail({ doc, onBack, onDelete }: { doc: KnowledgeDoc; onBack: () => void; onDelete: (id: string) => void }) {
+  const handleDelete = () => {
+    const shouldDelete = window.confirm(`确认删除文档「${doc.title}」吗？`);
+    if (shouldDelete) {
+      onDelete(doc.id);
+    }
+  };
+
+  const handleDownload = () => {
+    window.alert(`下载功能演示：${doc.title}`);
+  };
+
+  const handleShare = () => {
+    window.alert(`分享功能演示：${doc.title}`);
+  };
+
+  return (
+    <div className="p-10 max-w-7xl mx-auto">
+      {/* 顶部操作栏 */}
+      <div className="flex justify-between items-center mb-8">
+        <button
+          onClick={onBack}
+          className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
+        >
+          <ArrowLeft size={20} />
+          返回文档列表
+        </button>
+        <div className="flex gap-3">
+          <button
+            onClick={handleShare}
+            className="px-4 py-2 bg-surface hover:bg-surface-hover rounded flex items-center gap-2 text-sm text-gray-300 hover:text-white transition-colors"
+          >
+            <Share2 size={16} />
+            分享
+          </button>
+          <button
+            onClick={handleDownload}
+            className="px-4 py-2 bg-surface hover:bg-surface-hover rounded flex items-center gap-2 text-sm text-gray-300 hover:text-white transition-colors"
+          >
+            <Download size={16} />
+            下载
+          </button>
+          <button
+            onClick={handleDelete}
+            className="px-4 py-2 bg-surface hover:bg-red-500/20 rounded flex items-center gap-2 text-sm text-gray-300 hover:text-red-400 transition-colors"
+          >
+            删除
+          </button>
+        </div>
+      </div>
+
+      {/* 文档摘要卡片 */}
+      <div className="bg-surface rounded-xl p-8 mb-8 border border-white/10">
+        <div className="flex items-start gap-6">
+          <div className="w-16 h-20 bg-primary/20 rounded flex items-center justify-center shrink-0">
+            <FileText className="text-primary" size={32} />
+          </div>
+          <div className="flex-1">
+            <h1 className="text-3xl font-bold text-white mb-4">{doc.title}</h1>
+            <div className="flex flex-wrap gap-4 mb-6 text-sm text-gray-400">
+              <div className="flex items-center gap-2">
+                <Calendar size={16} />
+                <span>{doc.uploadDate || '未知日期'}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <UserIcon size={16} />
+                <span>{doc.uploader}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <FileText size={16} />
+                <span>{doc.fileSize || '未知大小'}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <FolderOpen size={16} />
+                <span>{doc.category}</span>
+              </div>
+            </div>
+            <div className="flex gap-2 mb-6">
+              {doc.tags.map(tag => (
+                <span key={tag} className="px-3 py-1 bg-primary/10 text-primary text-xs rounded-full border border-primary/30">
+                  {tag}
+                </span>
+              ))}
+            </div>
+            <div className="bg-surface-hover rounded-lg p-4 border-l-4 border-primary">
+              <h3 className="text-sm font-bold text-white mb-2">文档摘要</h3>
+              <p className="text-sm text-gray-300 leading-relaxed">
+                {doc.summary || '暂无摘要信息'}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 文档内容预览 */}
+      <div className="bg-white text-black rounded-xl p-12">
+        <div className="max-w-4xl mx-auto">
+          <div className="mb-8">
+            <h2 className="text-2xl font-bold mb-4">{doc.title}</h2>
+            <div className="h-1 bg-black w-20 mb-6"></div>
+          </div>
+
+          <div className="space-y-6 text-base leading-relaxed">
+            <section>
+              <h3 className="text-xl font-bold mb-3">一、研究背景</h3>
+              <p className="text-gray-800 leading-loose">
+                {doc.summary || '本文档提供了详细的研究背景和分析内容。'}
+              </p>
+            </section>
+
+            <section>
+              <h3 className="text-xl font-bold mb-3">二、核心发现</h3>
+              <ul className="list-disc ml-6 space-y-2 text-gray-800">
+                <li>市场趋势分析显示，消费者对智能化和电动化的接受度持续提升</li>
+                <li>用户体验和品牌价值观成为购买决策的关键影响因素</li>
+                <li>充电基础设施和续航能力仍是用户关注的核心痛点</li>
+                <li>年轻消费群体更倾向于通过社交媒体获取产品信息</li>
+              </ul>
+            </section>
+
+            <section>
+              <h3 className="text-xl font-bold mb-3">三、数据分析</h3>
+              <p className="text-gray-800 leading-loose mb-4">
+                基于大规模用户调研和市场数据分析，我们识别出以下关键趋势：
+              </p>
+              <div className="bg-gray-100 rounded-lg p-6 mb-4">
+                <div className="grid grid-cols-3 gap-4 text-center">
+                  <div>
+                    <div className="text-3xl font-bold text-black mb-1">85%</div>
+                    <div className="text-sm text-gray-600">用户满意度</div>
+                  </div>
+                  <div>
+                    <div className="text-3xl font-bold text-black mb-1">72%</div>
+                    <div className="text-sm text-gray-600">复购意愿</div>
+                  </div>
+                  <div>
+                    <div className="text-3xl font-bold text-black mb-1">68%</div>
+                    <div className="text-sm text-gray-600">推荐意愿</div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <h3 className="text-xl font-bold mb-3">四、策略建议</h3>
+              <ol className="list-decimal ml-6 space-y-2 text-gray-800">
+                <li>持续优化产品智能化体验，提升用户感知价值</li>
+                <li>加强品牌价值观传播，建立情感连接</li>
+                <li>完善充电网络布局，降低用户使用焦虑</li>
+                <li>强化社交媒体营销，提升品牌影响力</li>
+              </ol>
+            </section>
+
+            <section>
+              <h3 className="text-xl font-bold mb-3">五、结论</h3>
+              <p className="text-gray-800 leading-loose">
+                综合研究结果表明，在新能源汽车市场快速发展的背景下，用户需求呈现多元化和个性化趋势。
+                企业需要在产品力、品牌力和服务力三个维度持续发力，才能在激烈的市场竞争中保持优势地位。
+              </p>
+            </section>
+
+            <div className="mt-12 pt-6 border-t border-gray-300">
+              <p className="text-sm text-gray-500 text-center">
+                本文档由 {doc.uploader} 于 {doc.uploadDate} 上传 | {doc.category}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

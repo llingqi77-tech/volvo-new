@@ -1,0 +1,3 @@
+@echo off
+echo Starting API Server...
+node --import tsx src/api/server.ts

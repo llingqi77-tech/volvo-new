@@ -48,6 +48,7 @@ function CustomerChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [hasStarted, setHasStarted] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isPanelVisible, setIsPanelVisible] = useState(true);
   const [selectedFilters, setSelectedFilters] = useState({
     sentiment: [] as string[],
     category: [] as string[],
@@ -118,13 +119,23 @@ function CustomerChat() {
   };
 
   return (
-    <div className="flex h-full">
-      {/* 左侧：VOC数据面板 */}
-      <div className="w-80 bg-surface border-r border-white/10 flex flex-col">
-        <div className="p-6 border-b border-white/10">
-          <h3 className="text-lg font-bold text-white mb-2">VOC 数据库</h3>
-          <p className="text-xs text-gray-500">用户之声数据洞察</p>
-        </div>
+    <div className="flex h-full relative">
+      {/* 左侧：VOC数据面板 - 可隐藏 */}
+      {isPanelVisible && (
+        <div className="w-80 bg-surface border-r border-white/10 flex flex-col">
+          <div className="p-6 border-b border-white/10 flex justify-between items-center">
+            <div>
+              <h3 className="text-lg font-bold text-white mb-2">VOC 数据库</h3>
+              <p className="text-xs text-gray-500">用户之声数据洞察</p>
+            </div>
+            <button
+              onClick={() => setIsPanelVisible(false)}
+              className="w-8 h-8 bg-surface-hover hover:bg-white/10 rounded flex items-center justify-center text-gray-400 hover:text-white transition-colors"
+              title="隐藏面板"
+            >
+              ✕
+            </button>
+          </div>
 
         {/* 数据统计 */}
         <div className="p-6 border-b border-white/10">
@@ -205,6 +216,17 @@ function CustomerChat() {
           </div>
         </div>
       </div>
+      )}
+
+      {/* 展开按钮 - 仅在面板隐藏时显示 */}
+      {!isPanelVisible && (
+        <button
+          onClick={() => setIsPanelVisible(true)}
+          className="absolute left-0 top-1/2 -translate-y-1/2 bg-primary text-black px-3 py-6 rounded-r-lg font-bold shadow-lg hover:bg-primary/90 transition-all z-10"
+        >
+          <span className="writing-mode-vertical text-sm">VOC数据库</span>
+        </button>
+      )}
 
       {/* 右侧：对话区域 */}
       <div className="flex-1 flex flex-col overflow-hidden p-8">
