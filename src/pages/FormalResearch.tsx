@@ -1,15 +1,22 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { Command, Paperclip, Mic, ArrowRight, Upload, FileText, Share2, Download, User } from 'lucide-react';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer } from 'recharts';
 
 export default function FormalResearch({ isSidebarCollapsed = false }: { isSidebarCollapsed?: boolean }) {
   const [step, setStep] = useState(1);
+  const [userInput, setUserInput] = useState('');
+  const [classification, setClassification] = useState<{
+    kind: string;
+    framework: string;
+    rationale: string;
+    confidence: string;
+  } | null>(null);
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      {step === 1 && <StepStart onNext={() => setStep(2)} />}
-      {step === 2 && <StepVerify onNext={() => setStep(3)} />}
-      {step === 3 && <StepThreeColumn onNext={() => setStep(4)} />}
+      {step === 1 && <StepStart onNext={(input: string) => { setUserInput(input); setStep(2); }} />}
+      {step === 2 && <StepVerify userInput={userInput} onNext={(cls) => { setClassification(cls); setStep(3); }} />}
+      {step === 3 && <StepThreeColumn classification={classification} onNext={() => setStep(4)} />}
       {step === 4 && <StepAudience onNext={() => setStep(5)} />}
       {step === 5 && <StepConfirm onNext={() => setStep(6)} />}
       {step === 6 && <StepReport />}
@@ -17,7 +24,7 @@ export default function FormalResearch({ isSidebarCollapsed = false }: { isSideb
   );
 }
 
-function StepStart({ onNext }: { onNext: () => void }) {
+function StepStart({ onNext }: { onNext: (input: string) => void }) {
   const [text, setText] = useState('');
   const uploadRef = useRef<HTMLInputElement>(null);
 
@@ -39,6 +46,14 @@ function StepStart({ onNext }: { onNext: () => void }) {
       }
     };
     recognition.start();
+  };
+
+  const handleNext = () => {
+    if (!text.trim()) {
+      window.alert('请输入研究问题');
+      return;
+    }
+    onNext(text);
   };
 
   return (
@@ -65,7 +80,7 @@ function StepStart({ onNext }: { onNext: () => void }) {
             }}
           />
           <div className="px-8 pt-10 pb-12">
-            <textarea 
+            <textarea
               value={text}
               onChange={e => setText(e.target.value)}
               className="w-full bg-transparent border-none focus:ring-0 text-xl text-white placeholder:text-gray-600 resize-none h-32 outline-none"
@@ -80,7 +95,7 @@ function StepStart({ onNext }: { onNext: () => void }) {
               <button onClick={handleVoiceInput} className="text-gray-400 hover:text-white p-2" title="语音输入">
                 <Mic size={18} />
               </button>
-              <button onClick={onNext} className="bg-primary text-black px-8 py-3 rounded-lg font-bold flex items-center gap-2 hover:bg-primary/90">
+              <button onClick={handleNext} className="bg-primary text-black px-8 py-3 rounded-lg font-bold flex items-center gap-2 hover:bg-primary/90">
                 开始研究 <ArrowRight size={18} />
               </button>
             </div>
@@ -91,31 +106,124 @@ function StepStart({ onNext }: { onNext: () => void }) {
   );
 }
 
-function StepVerify({ onNext }: { onNext: () => void }) {
-  type Question = { id: string; mode: 'single' | 'multi'; title: string; options: string[] };
-  const questions: Question[] = [
-    { id: 'q1', mode: 'single', title: '核心调研受众细分（单选）', options: ['豪华车主转换型', '科技先行者', '中产家庭增购', '环保/极简主义者'] },
-    { id: 'q2', mode: 'multi', title: '竞争基准对标车型（多选）', options: ['BMW iX / Audi e-tron', 'Polestar 3 / 4', 'NIO ES7 / ES8'] },
-    { id: 'q3', mode: 'single', title: '研究地域优先级（单选）', options: ['北欧', '中国一线城市', '北美', '东南亚'] },
-    { id: 'q4', mode: 'multi', title: '关键评价维度（多选）', options: ['安全感知', '智能座舱体验', '可持续材料', '品牌价值认同'] },
-    { id: 'q5', mode: 'single', title: '输出报告风格（单选）', options: ['高层摘要', '策略详版', '数据导向'] },
-  ];
+function StepVerify({ userInput, onNext }: { userInput: string; onNext: (classification: any) => void }) {
+  type Question = { id: string; mode: 'single' | 'multi' | 'multiple'; title: string; options: string[] };
+  const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
   const [isThinking, setIsThinking] = useState(false);
+  const [classification, setClassification] = useState<any>(null);
+  const [isClassifying, setIsClassifying] = useState(true);
+
+  const generateNextQuestion = async (cls: any, previousAnswers: Array<{ question: string; answer: string[] }>) => {
+    try {
+      const response = await fetch('/api/generate-question', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userInput,
+          classification: cls,
+          previousAnswers,
+          round: previousAnswers.length + 1,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`API 返回错误: ${response.status}`);
+      }
+
+      const result = await response.json();
+
+      if (result.error) {
+        throw new Error(result.error);
+      }
+
+      return result.question;
+    } catch (error) {
+      console.error('生成问题失败:', error);
+      // 返回一个默认问题，避免卡住
+      return {
+        id: `q${previousAnswers.length + 1}`,
+        mode: 'single' as const,
+        title: `请选择第 ${previousAnswers.length + 1} 个研究参数`,
+        options: ['选项 A', '选项 B', '选项 C', '选项 D'],
+      };
+    }
+  };
+
+  // 初始化：调用 classifier 判断研究类型
+  useEffect(() => {
+    const classifyResearch = async () => {
+      try {
+        const response = await fetch('/api/classify-research', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userInput }),
+        });
+        const result = await response.json();
+        setClassification(result);
+
+        // 根据分类结果生成第一个问题
+        const firstQuestion = await generateNextQuestion(result, []);
+        setQuestions([firstQuestion]);
+        setIsClassifying(false);
+      } catch (error) {
+        console.error('分类失败:', error);
+        setIsClassifying(false);
+      }
+    };
+    classifyResearch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userInput]);
 
   const current = questions[currentIndex];
   const currentPicked = answers[current?.id] ?? [];
-  const isDone = currentIndex >= questions.length;
+  const isDone = currentIndex >= 5; // 固定 5 轮验证
 
-  const submitAnswer = (picked: string[]) => {
+  const submitAnswer = async (picked: string[]) => {
     if (!current) return;
+
+    console.log('提交答案:', {
+      questionId: current.id,
+      answer: picked,
+      currentIndex,
+      totalQuestions: questions.length
+    });
+
     setAnswers((prev) => ({ ...prev, [current.id]: picked }));
     setIsThinking(true);
-    setTimeout(() => {
+
+    try {
+      // 如果还没到 5 轮，生成下一题
+      if (currentIndex < 4) {
+        const previousAnswers = Object.entries({ ...answers, [current.id]: picked }).map(([qId, ans]) => ({
+          question: questions.find(q => q.id === qId)?.title ?? '',
+          answer: ans,
+        }));
+
+        console.log('生成下一题，当前轮次:', currentIndex + 1, '历史答案:', previousAnswers);
+
+        const nextQuestion = await generateNextQuestion(classification, previousAnswers);
+
+        console.log('下一题生成成功:', nextQuestion);
+
+        setQuestions((prev) => [...prev, nextQuestion]);
+      }
+
+      // 等待 API 调用完成后再更新索引
+      setTimeout(() => {
+        setIsThinking(false);
+        setCurrentIndex((prev) => prev + 1);
+        console.log('更新索引到:', currentIndex + 1);
+      }, 300);
+    } catch (error) {
+      console.error('生成下一题失败:', error);
       setIsThinking(false);
-      setCurrentIndex((prev) => prev + 1);
-    }, 700);
+      // 即使失败也继续，避免卡住
+      setTimeout(() => {
+        setCurrentIndex((prev) => prev + 1);
+      }, 300);
+    }
   };
 
   const toggleMulti = (option: string) => {
@@ -126,14 +234,27 @@ function StepVerify({ onNext }: { onNext: () => void }) {
     setAnswers((prev) => ({ ...prev, [current.id]: Array.from(set) }));
   };
 
+  if (isClassifying) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="bg-surface p-8 rounded-xl border border-white/10 text-center max-w-md">
+          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <div className="text-lg font-bold text-white mb-2">AI 正在分析您的研究问题</div>
+          <div className="text-sm text-gray-400 mb-4">
+            正在识别研究类型和分析框架...
+          </div>
+          <div className="text-xs text-gray-500">
+            <div className="mb-1">⏱️ 预计需要 3-5 秒</div>
+            <div>🚀 使用 DeepSeek 高速推理</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 overflow-y-auto p-12">
       <div className="max-w-4xl mx-auto space-y-6">
-        <div className="bg-surface p-6 rounded-xl border border-white/10">
-          <div className="text-xs text-primary font-bold mb-2">Volvo Insight AI</div>
-          <p className="text-sm text-gray-300">我已完成对你输入信息的初步解析。接下来我会逐题核验关键参数，请按顺序回答。</p>
-        </div>
-
         {questions.slice(0, currentIndex).map((q, idx) => (
           <div key={q.id} className="space-y-3">
             <div className="text-xs text-primary font-bold">问题 {idx + 1}</div>
@@ -158,7 +279,7 @@ function StepVerify({ onNext }: { onNext: () => void }) {
           </div>
         ))}
 
-        {!isDone && (
+        {!isDone && current && (
           <div className="space-y-3">
             <div className="text-xs text-primary font-bold">问题 {currentIndex + 1}</div>
             <div className="bg-surface p-6 rounded-xl border border-primary/40">
@@ -177,7 +298,7 @@ function StepVerify({ onNext }: { onNext: () => void }) {
                   );
                 })}
               </div>
-              {current.mode === 'multi' && (
+              {(current.mode === 'multi' || current.mode === 'multiple') && (
                 <div className="mt-4 flex justify-end">
                   <button
                     onClick={() => submitAnswer(currentPicked)}
@@ -205,7 +326,7 @@ function StepVerify({ onNext }: { onNext: () => void }) {
               <div className="text-sm font-bold">动态核验已完成</div>
               <div className="text-xs text-gray-400 mt-1">5/5 题已确认，系统将进入下一阶段。</div>
             </div>
-            <button onClick={onNext} className="bg-primary text-black px-8 py-3 font-bold flex items-center gap-2 hover:bg-primary/90">
+            <button onClick={() => onNext(classification)} className="bg-primary text-black px-8 py-3 font-bold flex items-center gap-2 hover:bg-primary/90">
               生成初步方案 <ArrowRight size={18} />
             </button>
           </div>
@@ -282,7 +403,7 @@ function EditablePanel({
   );
 }
 
-function StepThreeColumn({ onNext }: { onNext: () => void }) {
+function StepThreeColumn({ classification, onNext }: { classification: any; onNext: () => void }) {
   return (
     <div className="flex-1 flex flex-col p-8 overflow-hidden">
       <div className="flex-1 grid grid-cols-3 gap-6 overflow-hidden">
@@ -292,6 +413,14 @@ function StepThreeColumn({ onNext }: { onNext: () => void }) {
             <h3 className="text-2xl font-bold mb-6">调研方案</h3>
             <div className="space-y-4">
               <div className="p-4 bg-white/5 border-l-2 border-primary">
+                <div className="text-xs text-gray-500 mb-1">研究类型</div>
+                <div className="text-sm font-bold">{classification?.kind ?? '未知'}</div>
+              </div>
+              <div className="p-4 bg-white/5 border-l-2 border-primary">
+                <div className="text-xs text-gray-500 mb-1">分析框架</div>
+                <div className="text-sm font-bold">{classification?.framework?.toUpperCase() ?? '未知'}</div>
+              </div>
+              <div className="p-4 bg-white/5">
                 <div className="text-xs text-gray-500 mb-1">方法论</div>
                 <div className="text-sm font-bold">双盲对比研究与沉浸式人机交互测试</div>
               </div>
