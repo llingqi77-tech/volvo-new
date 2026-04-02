@@ -36,6 +36,7 @@ export type ResearchTask = {
 export default function App() {
   const [activeModule, setActiveModule] = useState('knowledge');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [docs, setDocs] = useState<KnowledgeDoc[]>([
     // 洞察报告库 (15个)
     { id: 'doc-1', title: '2024年全球纯电SUV市场趋势深度调研', type: 'PDF • 14.2 MB • 2024-11-24', tags: ['电动化', 'SUV'], uploader: '王安德', color: 'text-primary', category: '洞察报告库', summary: '本报告深入分析了2024年全球纯电SUV市场的发展趋势，涵盖市场规模、消费者偏好、技术创新和竞争格局。研究发现，中国和欧洲市场增长最快，智能化和续航能力成为核心竞争力。', uploadDate: '2024-11-24', fileSize: '14.2 MB' },
     { id: 'doc-2', title: '年轻消费者新能源车购买决策研究', type: 'PDF • 8.5 MB • 2024-11-20', tags: ['消费者洞察', '年轻人'], uploader: '李雅婷', color: 'text-primary', category: '洞察报告库', summary: '针对18-35岁年轻消费群体的深度访谈研究，揭示了年轻人在购买新能源车时的核心关注点、决策路径和痛点。智能化体验、品牌价值观和社交属性是关键影响因素。', uploadDate: '2024-11-20', fileSize: '8.5 MB' },
