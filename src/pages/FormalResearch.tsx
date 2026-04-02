@@ -1317,11 +1317,11 @@ function StepThreeColumn({
 
 function StepAudience({ onNext }: { onNext: () => void }) {
   const [profiles, setProfiles] = useState([
-    { id: 'c1', name: '理性先锋型', tags: ['高净值', '智驾优先', '效率导向'], users: '128+ users', voc: '542+ VOC' },
-    { id: 'c2', name: '家庭安全型', tags: ['家庭用户', '空间诉求', '安全敏感'], users: '106+ users', voc: '497+ VOC' },
-    { id: 'c3', name: '环保极简型', tags: ['可持续偏好', '极简审美', '材质敏感'], users: '94+ users', voc: '451+ VOC' },
-    { id: 'c4', name: '科技尝鲜型', tags: ['数字原生', '功能探索', '社媒活跃'], users: '113+ users', voc: '533+ VOC' },
-    { id: 'c5', name: '品牌认同型', tags: ['品牌价值', '长期主义', '口碑驱动'], users: '102+ users', voc: '468+ VOC' },
+    { id: 'c1', name: '理性先锋型', tags: ['高净值', '智驾优先', '效率导向'], users: 128, voc: 542 },
+    { id: 'c2', name: '家庭安全型', tags: ['家庭用户', '空间诉求', '安全敏感'], users: 106, voc: 497 },
+    { id: 'c3', name: '环保极简型', tags: ['可持续偏好', '极简审美', '材质敏感'], users: 94, voc: 451 },
+    { id: 'c4', name: '科技尝鲜型', tags: ['数字原生', '功能探索', '社媒活跃'], users: 113, voc: 533 },
+    { id: 'c5', name: '品牌认同型', tags: ['品牌价值', '长期主义', '口碑驱动'], users: 102, voc: 468 },
   ]);
   const [selectedProfileId, setSelectedProfileId] = useState('c1');
   const [tagInput, setTagInput] = useState('');
@@ -1334,10 +1334,77 @@ function StepAudience({ onNext }: { onNext: () => void }) {
     { id: 'p5-1', profileId: 'c5', name: '宋致远', tags: ['长期主义', '品牌认同'], score: 8.6, conf: 90, cdpTags: ['品牌价值', '长期主义', '口碑驱动'], voc: '我更看重品牌长期信誉和真实用户口碑，而非短期营销话术。', radar: [81, 83, 77, 75, 85, 78, 91] },
   ]);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingProfile, setEditingProfile] = useState<typeof profiles[0] | null>(null);
+  const [selectedPrimaryTag, setSelectedPrimaryTag] = useState<string | null>(null);
+  const [selectedSecondaryTags, setSelectedSecondaryTags] = useState<string[]>([]);
+
+  // CDP标签库定义（参考人设库管理）
+  const primaryTags = ['身份与基础属性', '社会与人口统计', '购车决策与潜客行为', '车辆使用与售后服务', '数字触点与线上行为', '品牌认知与情感连接'];
+
+  const secondaryTags: Record<string, string[]> = {
+    '身份与基础属性': ['年龄段', '职业类型', '收入水平', '教育背景', '家庭结构'],
+    '社会与人口统计': ['城市等级', '居住区域', '婚姻状况', '子女情况', '生活方式'],
+    '购车决策与潜客行为': ['购车动机', '决策周期', '信息渠道', '试驾偏好', '价格敏感度'],
+    '车辆使用与售后服务': ['用车场景', '里程需求', '保养频率', '服务期望', '品牌忠诚度'],
+    '数字触点与线上行为': ['社交平台', '内容偏好', '互动频率', '设备使用', '数字素养'],
+    '品牌认知与情感连接': ['品牌认知', '情感倾向', '价值观匹配', '推荐意愿', '社群参与']
+  };
 
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId) ?? profiles[0];
   const selectedPersona = personas.find((p) => p.id === selectedPersonaId) ?? null;
   const filteredPersonas = personas.filter((p) => p.profileId === selectedProfileId || p.profileId === 'all');
+
+  // 计算筛选后的users和voc数量
+  const calculateFilteredCounts = () => {
+    if (!selectedPrimaryTag && selectedSecondaryTags.length === 0) {
+      return editingProfile ? { users: editingProfile.users, voc: editingProfile.voc } : { users: 0, voc: 0 };
+    }
+
+    // 模拟筛选逻辑：根据选择的标签减少数量
+    const baseUsers = editingProfile?.users ?? 0;
+    const baseVoc = editingProfile?.voc ?? 0;
+    const reductionFactor = 0.7 + (selectedSecondaryTags.length * 0.05); // 每多选一个二级标签，减少5%
+
+    return {
+      users: Math.floor(baseUsers * reductionFactor),
+      voc: Math.floor(baseVoc * reductionFactor)
+    };
+  };
+
+  const filteredCounts = calculateFilteredCounts();
+
+  const handleOpenEditModal = (profile: typeof profiles[0]) => {
+    setEditingProfile(profile);
+    setSelectedPrimaryTag(null);
+    setSelectedSecondaryTags([]);
+    setIsEditModalOpen(true);
+  };
+
+  const handleCloseEditModal = () => {
+    setIsEditModalOpen(false);
+    setEditingProfile(null);
+    setSelectedPrimaryTag(null);
+    setSelectedSecondaryTags([]);
+  };
+
+  const handleToggleSecondaryTag = (tag: string) => {
+    setSelectedSecondaryTags(prev =>
+      prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
+    );
+  };
+
+  const handleApplyFilter = () => {
+    if (editingProfile) {
+      // 更新画像的users和voc数量
+      setProfiles(prev => prev.map(p =>
+        p.id === editingProfile.id
+          ? { ...p, users: filteredCounts.users, voc: filteredCounts.voc }
+          : p
+      ));
+    }
+    handleCloseEditModal();
+  };
 
   const addTagToAllProfiles = () => {
     const tag = tagInput.trim();
@@ -1354,8 +1421,8 @@ function StepAudience({ onNext }: { onNext: () => void }) {
         id: `c-new-${Date.now()}`,
         name: `新增画像${suffix}`,
         tags: ['新增标签', '趋势洞察', '待验证'],
-        users: `${90 + prev.length * 3}+ users`,
-        voc: `${430 + prev.length * 12}+ VOC`,
+        users: 90 + prev.length * 3,
+        voc: 430 + prev.length * 12,
       },
     ]);
   };
@@ -1421,22 +1488,29 @@ function StepAudience({ onNext }: { onNext: () => void }) {
               {profiles.map((profile) => {
                 const active = selectedProfileId === profile.id;
                 return (
-                  <button
-                    key={profile.id}
-                    onClick={() => setSelectedProfileId(profile.id)}
-                    className={`w-full text-left p-4 rounded border transition-colors ${active ? 'border-primary bg-primary/10' : 'border-white/10 hover:bg-white/5'}`}
-                  >
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="font-bold">{profile.name}</span>
-                      <span className="text-[10px] text-primary">{profile.users}</span>
-                    </div>
-                    <div className="flex flex-wrap gap-2 mb-2">
-                      {profile.tags.map((tag) => (
-                        <span key={tag} className="px-2 py-1 rounded bg-surface-hover text-xs text-gray-300">{tag}</span>
-                      ))}
-                    </div>
-                    <div className="text-[11px] text-gray-500">{profile.voc}</div>
-                  </button>
+                  <div key={profile.id} className="relative">
+                    <button
+                      onClick={() => setSelectedProfileId(profile.id)}
+                      className={`w-full text-left p-4 rounded border transition-colors ${active ? 'border-primary bg-primary/10' : 'border-white/10 hover:bg-white/5'}`}
+                    >
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="font-bold">{profile.name}</span>
+                        <span className="text-[10px] text-primary">{profile.users}+ users</span>
+                      </div>
+                      <div className="flex flex-wrap gap-2 mb-2">
+                        {profile.tags.map((tag) => (
+                          <span key={tag} className="px-2 py-1 rounded bg-surface-hover text-xs text-gray-300">{tag}</span>
+                        ))}
+                      </div>
+                      <div className="text-[11px] text-gray-500">{profile.voc}+ VOC</div>
+                    </button>
+                    <button
+                      onClick={() => handleOpenEditModal(profile)}
+                      className="absolute top-2 right-2 px-2 py-1 bg-primary/20 hover:bg-primary/30 text-primary text-xs rounded transition-colors"
+                    >
+                      调整
+                    </button>
+                  </div>
                 );
               })}
             </div>
@@ -1518,6 +1592,120 @@ function StepAudience({ onNext }: { onNext: () => void }) {
           )}
         </div>
       </div>
+
+      {/* CDP标签筛选模态框 */}
+      {isEditModalOpen && editingProfile && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-8">
+          <div className="bg-surface rounded-xl border border-white/10 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-white/10 flex justify-between items-center sticky top-0 bg-surface z-10">
+              <h3 className="text-xl font-bold">调整画像：{editingProfile.name}</h3>
+              <button onClick={handleCloseEditModal} className="text-gray-400 hover:text-white text-2xl">✕</button>
+            </div>
+
+            <div className="p-6 space-y-6">
+              {/* 当前匹配数量 */}
+              <div className="bg-primary/10 border border-primary/30 rounded-lg p-4">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <div className="text-sm text-gray-400 mb-1">当前筛选结果</div>
+                    <div className="flex gap-6">
+                      <div>
+                        <span className="text-2xl font-bold text-primary">{filteredCounts.users}</span>
+                        <span className="text-sm text-gray-400 ml-2">users</span>
+                      </div>
+                      <div>
+                        <span className="text-2xl font-bold text-primary">{filteredCounts.voc}</span>
+                        <span className="text-sm text-gray-400 ml-2">VOC文本</span>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleApplyFilter}
+                    className="bg-primary text-black px-6 py-2 rounded font-bold hover:bg-primary/90 transition-colors"
+                  >
+                    应用筛选
+                  </button>
+                </div>
+              </div>
+
+              {/* CDP标签库 */}
+              <div>
+                <h4 className="text-sm font-bold text-primary mb-3">CDP 标签库</h4>
+
+                {/* 一级标签 */}
+                <div className="mb-4">
+                  <div className="text-xs text-gray-500 mb-2">一级分类</div>
+                  <div className="flex flex-wrap gap-2">
+                    {primaryTags.map((tag) => {
+                      const isActive = selectedPrimaryTag === tag;
+                      return (
+                        <button
+                          key={tag}
+                          onClick={() => {
+                            setSelectedPrimaryTag(isActive ? null : tag);
+                            setSelectedSecondaryTags([]);
+                          }}
+                          className={`px-3 py-2 rounded text-sm font-medium transition-colors ${
+                            isActive
+                              ? 'bg-primary text-black'
+                              : 'bg-surface-hover text-gray-300 hover:bg-white/10'
+                          }`}
+                        >
+                          {tag}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 二级标签 */}
+                {selectedPrimaryTag && (
+                  <div>
+                    <div className="text-xs text-gray-500 mb-2">二级标签（可多选）</div>
+                    <div className="flex flex-wrap gap-2">
+                      {secondaryTags[selectedPrimaryTag]?.map((tag) => {
+                        const isSelected = selectedSecondaryTags.includes(tag);
+                        return (
+                          <button
+                            key={tag}
+                            onClick={() => handleToggleSecondaryTag(tag)}
+                            className={`px-3 py-2 rounded text-sm transition-colors ${
+                              isSelected
+                                ? 'bg-primary/20 text-primary border border-primary'
+                                : 'bg-surface-hover text-gray-300 hover:bg-white/10 border border-white/10'
+                            }`}
+                          >
+                            {tag}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 已选标签摘要 */}
+              {(selectedPrimaryTag || selectedSecondaryTags.length > 0) && (
+                <div className="bg-white/5 rounded-lg p-4">
+                  <div className="text-xs text-gray-500 mb-2">已选标签</div>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedPrimaryTag && (
+                      <span className="px-2 py-1 bg-primary/20 text-primary text-xs rounded border border-primary/30">
+                        {selectedPrimaryTag}
+                      </span>
+                    )}
+                    {selectedSecondaryTags.map((tag) => (
+                      <span key={tag} className="px-2 py-1 bg-primary/10 text-primary text-xs rounded">
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
