@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Database, Users, MessageSquare, LineChart, User, PanelLeftClose, PanelLeftOpen, ChevronDown, FolderClock, LogOut, ClipboardList } from 'lucide-react';
+import { Database, Users, MessageSquare, LineChart, User, PanelLeftClose, PanelLeftOpen, ChevronDown, FolderClock, LogOut } from 'lucide-react';
 
 export default function Sidebar({
   activeModule,
@@ -20,7 +20,6 @@ export default function Sidebar({
     { id: 'persona', icon: Users, label: '人设库管理' },
     { id: 'chat', icon: MessageSquare, label: '聊天模式' },
     { id: 'research', icon: LineChart, label: '正式研究' },
-    { id: 'tasks', icon: ClipboardList, label: '任务中心' },
   ];
 
   return (
