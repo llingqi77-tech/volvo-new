@@ -1413,20 +1413,6 @@ function StepAudience({ onNext }: { onNext: () => void }) {
     setTagInput('');
   };
 
-  const generateNewProfiles = () => {
-    const suffix = `${profiles.length + 1}`;
-    setProfiles((prev) => [
-      ...prev,
-      {
-        id: `c-new-${Date.now()}`,
-        name: `新增画像${suffix}`,
-        tags: ['新增标签', '趋势洞察', '待验证'],
-        users: 90 + prev.length * 3,
-        voc: 430 + prev.length * 12,
-      },
-    ]);
-  };
-
   const generatePersonas = () => {
     const created = profiles.slice(0, 5).flatMap((profile, idx) => [
       {
@@ -1491,7 +1477,7 @@ function StepAudience({ onNext }: { onNext: () => void }) {
                   <div key={profile.id} className="relative">
                     <button
                       onClick={() => setSelectedProfileId(profile.id)}
-                      className={`w-full text-left p-4 rounded border transition-colors ${active ? 'border-primary bg-primary/10' : 'border-white/10 hover:bg-white/5'}`}
+                      className={`w-full text-left p-4 pb-10 rounded border transition-colors ${active ? 'border-primary bg-primary/10' : 'border-white/10 hover:bg-white/5'}`}
                     >
                       <div className="flex justify-between items-center mb-2">
                         <span className="font-bold">{profile.name}</span>
@@ -1505,8 +1491,11 @@ function StepAudience({ onNext }: { onNext: () => void }) {
                       <div className="text-[11px] text-gray-500">{profile.voc}+ VOC</div>
                     </button>
                     <button
-                      onClick={() => handleOpenEditModal(profile)}
-                      className="absolute top-2 right-2 px-2 py-1 bg-primary/20 hover:bg-primary/30 text-primary text-xs rounded transition-colors"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleOpenEditModal(profile);
+                      }}
+                      className="absolute bottom-2 right-2 px-2 py-1 bg-primary/20 hover:bg-primary/30 text-primary text-xs rounded transition-colors"
                     >
                       调整
                     </button>
@@ -1517,7 +1506,7 @@ function StepAudience({ onNext }: { onNext: () => void }) {
           </div>
 
           <div className="bg-surface p-6 rounded-xl">
-            <h3 className="text-sm font-bold mb-4">新增画像</h3>
+            <h3 className="text-sm font-bold mb-4">标签管理</h3>
             <div className="flex flex-wrap gap-2 mb-4">
               {selectedProfile.tags.map((tag) => (
                 <span key={tag} className="px-2 py-1 rounded bg-surface-hover text-xs text-primary">{tag}</span>
@@ -1533,9 +1522,6 @@ function StepAudience({ onNext }: { onNext: () => void }) {
               />
               <button onClick={addTagToAllProfiles} className="px-4 py-2 bg-primary text-black rounded text-sm font-bold">添加</button>
             </div>
-            <button onClick={generateNewProfiles} className="w-full mt-4 bg-primary text-black py-2 rounded text-sm font-bold">
-              生成新画像
-            </button>
             <button onClick={generatePersonas} className="w-full mt-3 bg-surface-hover text-white py-2 rounded text-sm font-bold hover:bg-white/10">
               根据当前画像生成模拟人设
             </button>
