@@ -2,7 +2,7 @@
  * API 测试页面
  *
  * 访问路径：http://localhost:3000/api-test
- * 用于验证 OpenRouter API 配置是否正确
+ * 用于验证 DeepSeek 官方 API 配置是否正确
  */
 
 import { useState } from 'react';
@@ -52,7 +52,7 @@ export default function ApiTestPage() {
   return (
     <div className="min-h-screen bg-background p-8">
       <div className="max-w-4xl mx-auto">
-        <h1 className="text-3xl font-bold text-white mb-8">OpenRouter API 测试</h1>
+        <h1 className="text-3xl font-bold text-white mb-8">DeepSeek API 测试</h1>
 
         {/* API 配置信息 */}
         <div className="bg-surface rounded-xl p-6 mb-6">
@@ -61,23 +61,23 @@ export default function ApiTestPage() {
             <div className="flex">
               <span className="text-gray-400 w-32">API Key:</span>
               <span className="text-white font-mono">
-                {process.env.OPENROUTER_API_KEY
-                  ? `${process.env.OPENROUTER_API_KEY.slice(0, 20)}...`
+                {process.env.DEEPSEEK_API_KEY
+                  ? `${process.env.DEEPSEEK_API_KEY.slice(0, 20)}...`
                   : '未配置'}
               </span>
             </div>
             <div className="flex">
               <span className="text-gray-400 w-32">模型:</span>
               <span className="text-white font-mono">
-                {process.env.OPENROUTER_MODEL || '未配置'}
+                {process.env.DEEPSEEK_MODEL || 'deepseek-chat'}
               </span>
             </div>
             <div className="flex">
               <span className="text-gray-400 w-32">状态:</span>
               <span
-                className={`font-semibold ${process.env.OPENROUTER_API_KEY ? 'text-green-400' : 'text-red-400'}`}
+                className={`font-semibold ${process.env.DEEPSEEK_API_KEY ? 'text-green-400' : 'text-red-400'}`}
               >
-                {process.env.OPENROUTER_API_KEY ? '✓ 已配置' : '✗ 未配置'}
+                {process.env.DEEPSEEK_API_KEY ? '✓ 已配置' : '✗ 未配置'}
               </span>
             </div>
           </div>
@@ -94,7 +94,7 @@ export default function ApiTestPage() {
           />
           <button
             onClick={testApi}
-            disabled={isLoading || !process.env.OPENROUTER_API_KEY}
+            disabled={isLoading || !process.env.DEEPSEEK_API_KEY}
             className="mt-4 px-6 py-2 bg-primary text-white rounded-lg hover:bg-primary/80 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isLoading ? '请求中...' : '发送测试'}
@@ -119,12 +119,12 @@ export default function ApiTestPage() {
         <div className="mt-8 bg-surface rounded-xl p-6">
           <h2 className="text-xl font-semibold text-white mb-4">使用说明</h2>
           <div className="text-sm text-gray-400 space-y-2">
-            <p>1. 确保 .env 文件中配置了 OPENROUTER_API_KEY 和 OPENROUTER_MODEL</p>
+            <p>1. 确保 .env 文件中配置了 DEEPSEEK_API_KEY 和 DEEPSEEK_MODEL</p>
             <p>2. 重启开发服务器（npm run dev）使环境变量生效</p>
             <p>3. 在上方输入框输入测试消息，点击"发送测试"</p>
             <p>4. 如果配置正确，将看到 AI 的流式响应</p>
             <p className="mt-4 text-yellow-400">
-              ⚠️ 注意：OpenRouter 的免费模型可能有速率限制
+              ⚠️ 注意：DeepSeek 的免费模型可能有速率限制
             </p>
           </div>
         </div>

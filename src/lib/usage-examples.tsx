@@ -1,5 +1,5 @@
 /**
- * 使用示例：如何在 React 组件中使用 OpenRouter API
+ * 使用示例：如何在 React 组件中使用 DeepSeek 官方 API
  *
  * 这个文件展示了如何替换现有的模拟代码为真实的 AI 调用
  */

@@ -14,8 +14,8 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 console.log('Environment loaded:', {
-  hasApiKey: !!process.env.OPENROUTER_API_KEY,
-  model: process.env.OPENROUTER_MODEL
+  hasApiKey: !!(process.env.DEEPSEEK_API_KEY ?? process.env.OPENROUTER_API_KEY),
+  model: process.env.DEEPSEEK_MODEL ?? process.env.OPENROUTER_MODEL
 });
 
 const app = express();

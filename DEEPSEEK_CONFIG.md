@@ -56,9 +56,10 @@
 
 `.env` 文件内容：
 ```env
-OPENROUTER_API_KEY="sk-de16a1123afb4a909855798780865211"
-OPENROUTER_BASE_URL="https://api.deepseek.com"
-OPENROUTER_MODEL="deepseek-chat"
+DEEPSEEK_API_KEY="sk-de16a1123afb4a909855798780865211"
+# 可选：custom base url（默认 https://api.deepseek.com）
+# DEEPSEEK_BASE_URL="https://api.deepseek.com"
+DEEPSEEK_MODEL="deepseek-chat"
 APP_URL="http://localhost:3000"
 ```
 
@@ -76,7 +77,7 @@ APP_URL="http://localhost:3000"
 ## 注意事项
 
 - DeepSeek API 使用标准 OpenAI 格式
-- 代码已自动适配（通过 `OPENROUTER_BASE_URL` 配置）
+- 代码已自动适配（通过 `DEEPSEEK_BASE_URL` 配置，可选）
 - 无需修改代码，只需更新 `.env` 文件
 - API key 请妥善保管，不要提交到 Git
 

@@ -1,7 +1,7 @@
 /**
  * 分析引擎
  *
- * 基于选定的分析框架，调用 OpenRouter API 进行分析
+  * 基于选定的分析框架，调用 DeepSeek 官方 API 进行分析
  */
 
 import { chatCompletion } from './openrouter-client';

@@ -1,20 +1,17 @@
 /**
- * OpenRouter API Client for Step-3.5 Model
+ * DeepSeek Official API Client (OpenAI-compatible)
  *
- * This client provides streaming chat completion using OpenRouter's API.
- * Compatible with OpenAI SDK format.
+ * Provides streaming/non-streaming chat completions via DeepSeek's official endpoint.
+ * Compatible with the OpenAI "chat/completions" request/response shape.
  */
 
-// 支持自定义 base URL
-const getApiUrl = () => {
-  const baseUrl = process.env.OPENROUTER_BASE_URL;
-  if (baseUrl) {
-    // 如果提供了自定义 base URL，确保它以 /v1/chat/completions 结尾
-    return baseUrl.endsWith('/v1/chat/completions')
-      ? baseUrl
-      : `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`;
-  }
-  return 'https://openrouter.ai/api/v1/chat/completions';
+type Maybe<T> = T | undefined;
+
+// 支持自定义 base URL（例如代理/网关）
+const getApiUrl = (): string => {
+  const baseUrl: Maybe<string> = process.env.DEEPSEEK_BASE_URL;
+  const deepSeekBase = baseUrl ? baseUrl.replace(/\/$/, '') : 'https://api.deepseek.com';
+  return `${deepSeekBase}/v1/chat/completions`;
 };
 
 export interface Message {
@@ -29,7 +26,7 @@ export interface StreamOptions {
 }
 
 /**
- * Stream chat completion from OpenRouter
+ * Stream chat completion from DeepSeek (SSE-style)
  *
  * @param messages - Array of chat messages
  * @param options - Streaming callbacks
@@ -38,12 +35,12 @@ export async function streamChatCompletion(
   messages: Message[],
   options: StreamOptions
 ): Promise<void> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  const model = process.env.OPENROUTER_MODEL || 'stepfun/step-3.5-flash:free';
+  const apiKey: Maybe<string> = process.env.DEEPSEEK_API_KEY ?? process.env.OPENROUTER_API_KEY;
+  const model: string = process.env.DEEPSEEK_MODEL ?? process.env.OPENROUTER_MODEL ?? 'deepseek-chat';
   const apiUrl = getApiUrl();
 
   if (!apiKey) {
-    throw new Error('OPENROUTER_API_KEY is not configured');
+    throw new Error('DEEPSEEK_API_KEY is not configured');
   }
 
   try {
@@ -52,7 +49,7 @@ export async function streamChatCompletion(
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
-        'HTTP-Referer': window.location.origin,
+        'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000',
         'X-Title': 'Volvo Research Workbench',
       },
       body: JSON.stringify({
@@ -67,7 +64,7 @@ export async function streamChatCompletion(
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new Error(
-        `OpenRouter API error: ${response.status} ${response.statusText}. ${JSON.stringify(errorData)}`
+        `DeepSeek API error: ${response.status} ${response.statusText}. ${JSON.stringify(errorData)}`
       );
     }
 
@@ -120,19 +117,19 @@ export async function streamChatCompletion(
  * Non-streaming chat completion (for simple use cases)
  *
  * @param messages - Array of chat messages
- * @param timeoutMs - OpenRouter 请求超时；长文案生成（如调研方案）需 120s+
+ * @param timeoutMs - DeepSeek 请求超时；长文案生成（如调研方案）需 120s+
  * @returns Complete response text
  */
 export async function chatCompletion(messages: Message[], timeoutMs = 90000): Promise<string> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  const model = process.env.OPENROUTER_MODEL || 'stepfun/step-3.5-flash:free';
+  const apiKey: Maybe<string> = process.env.DEEPSEEK_API_KEY ?? process.env.OPENROUTER_API_KEY;
+  const model: string = process.env.DEEPSEEK_MODEL ?? process.env.OPENROUTER_MODEL ?? 'deepseek-chat';
   const apiUrl = getApiUrl();
 
   if (!apiKey) {
-    throw new Error('OPENROUTER_API_KEY is not configured');
+    throw new Error('DEEPSEEK_API_KEY is not configured');
   }
 
-  console.log('API Request:', { apiUrl, model, messageCount: messages.length, timeoutMs });
+  console.log('DeepSeek API Request:', { apiUrl, model, messageCount: messages.length, timeoutMs });
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -159,7 +156,7 @@ export async function chatCompletion(messages: Message[], timeoutMs = 90000): Pr
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new Error(
-        `OpenRouter API error: ${response.status} ${response.statusText}. ${JSON.stringify(errorData)}`
+        `DeepSeek API error: ${response.status} ${response.statusText}. ${JSON.stringify(errorData)}`
       );
     }
 
