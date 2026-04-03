@@ -81,9 +81,12 @@ export default function Sidebar({
             <User size={20} />
           </button>
         ) : (
-          <div className="relative">
+          <div
+            className="relative"
+            onMouseEnter={() => setIsProfileMenuOpen(true)}
+            onMouseLeave={() => setIsProfileMenuOpen(false)}
+          >
             <button
-              onClick={() => setIsProfileMenuOpen((prev) => !prev)}
               className="w-full flex items-center justify-between px-4 py-3 transition-colors rounded-lg text-gray-300 hover:text-text-main hover:bg-surface"
               title="个人主页"
             >

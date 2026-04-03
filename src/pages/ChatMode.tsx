@@ -43,22 +43,6 @@ export default function ChatMode() {
   );
 }
 
-// CDP标签库类型定义
-type CDPTag = {
-  id: string;
-  name: string;
-  children?: CDPTag[];
-};
-
-// 用户画像类型
-type UserPersona = {
-  id: string;
-  name: string;
-  users: number;
-  vocCount: number;
-  tags: string[];
-};
-
 function CustomerChat() {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -68,102 +52,60 @@ function CustomerChat() {
   const [selectedFilters, setSelectedFilters] = useState({
     sentiment: [] as string[],
     category: [] as string[],
+    source: [] as string[],
     timeRange: 'all' as string
   });
-  const [editingPersona, setEditingPersona] = useState<UserPersona | null>(null);
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
 
-  // CDP标签库数据（参考图片中的多级结构）
-  const cdpTagLibrary: CDPTag[] = [
-    {
-      id: 'demographics',
-      name: '人口统计',
-      children: [
-        { id: 'age-18-25', name: '18-25岁' },
-        { id: 'age-26-35', name: '26-35岁' },
-        { id: 'age-36-45', name: '36-45岁' },
-        { id: 'age-46-55', name: '46-55岁' },
-        { id: 'age-56+', name: '56岁以上' }
-      ]
-    },
-    {
-      id: 'income',
-      name: '收入水平',
-      children: [
-        { id: 'income-low', name: '10万以下' },
-        { id: 'income-mid', name: '10-30万' },
-        { id: 'income-high', name: '30-50万' },
-        { id: 'income-ultra', name: '50万以上' }
-      ]
-    },
-    {
-      id: 'occupation',
-      name: '职业类型',
-      children: [
-        { id: 'occ-tech', name: '科技行业' },
-        { id: 'occ-finance', name: '金融行业' },
-        { id: 'occ-edu', name: '教育行业' },
-        { id: 'occ-medical', name: '医疗行业' },
-        { id: 'occ-gov', name: '政府机关' },
-        { id: 'occ-entrepreneur', name: '企业主' }
-      ]
-    },
-    {
-      id: 'lifestyle',
-      name: '生活方式',
-      children: [
-        { id: 'life-family', name: '家庭导向' },
-        { id: 'life-career', name: '事业导向' },
-        { id: 'life-outdoor', name: '户外运动' },
-        { id: 'life-tech', name: '科技爱好者' },
-        { id: 'life-eco', name: '环保主义者' }
-      ]
-    },
-    {
-      id: 'purchase',
-      name: '购车行为',
-      children: [
-        { id: 'pur-first', name: '首次购车' },
-        { id: 'pur-upgrade', name: '增购换购' },
-        { id: 'pur-luxury', name: '豪华品牌偏好' },
-        { id: 'pur-ev', name: '纯电优先' },
-        { id: 'pur-safety', name: '安全优先' }
-      ]
-    },
-    {
-      id: 'usage',
-      name: '用车场景',
-      children: [
-        { id: 'use-commute', name: '日常通勤' },
-        { id: 'use-family', name: '家庭出行' },
-        { id: 'use-business', name: '商务接待' },
-        { id: 'use-travel', name: '长途旅行' },
-        { id: 'use-urban', name: '城市代步' }
-      ]
+  // 模拟VOC数据统计 - 按来源分布
+  const vocDataBySource = {
+    '问卷系统': 342,
+    '客服工单': 289,
+    '评价中心': 256,
+    '语音系统': 198,
+    '舆情系统': 162
+  };
+
+  // 计算筛选后的总数据量
+  const filteredTotal = useMemo(() => {
+    let baseTotal = 1247;
+
+    // 按来源筛选
+    if (selectedFilters.source.length > 0) {
+      baseTotal = selectedFilters.source.reduce((sum, source) => {
+        return sum + (vocDataBySource[source as keyof typeof vocDataBySource] || 0);
+      }, 0);
     }
-  ];
 
-  // 用户画像数据
-  const [personas, setPersonas] = useState<UserPersona[]>([
-    { id: 'p1', name: '科技精英', users: 342, vocCount: 856, tags: ['26-35岁', '30-50万', '科技行业', '科技爱好者'] },
-    { id: 'p2', name: '家庭主力', users: 289, vocCount: 723, tags: ['36-45岁', '10-30万', '家庭导向', '家庭出行'] },
-    { id: 'p3', name: '环保先锋', users: 156, vocCount: 412, tags: ['26-35岁', '30-50万', '环保主义者', '纯电优先'] },
-    { id: 'p4', name: '商务精英', users: 198, vocCount: 534, tags: ['36-45岁', '50万以上', '企业主', '商务接待'] },
-    { id: 'p5', name: '安全至上', users: 262, vocCount: 678, tags: ['46-55岁', '30-50万', '安全优先', '家庭出行'] }
-  ]);
+    // 按情感倾向筛选
+    if (selectedFilters.sentiment.length > 0) {
+      const sentimentRatio = selectedFilters.sentiment.length / 3; // 3种情感
+      baseTotal = Math.round(baseTotal * sentimentRatio);
+    }
+
+    // 按时间范围筛选
+    const timeRatios: Record<string, number> = {
+      'all': 1.0,
+      'week': 0.15,
+      'month': 0.35,
+      'quarter': 0.65
+    };
+    baseTotal = Math.round(baseTotal * (timeRatios[selectedFilters.timeRange] || 1.0));
+
+    return baseTotal;
+  }, [selectedFilters.source, selectedFilters.sentiment, selectedFilters.timeRange]);
 
   // 模拟VOC数据统计
   const vocStats = {
-    total: 1247,
-    positive: 856,
-    neutral: 245,
-    negative: 146,
+    total: filteredTotal,
+    positive: Math.round(filteredTotal * 0.686),
+    neutral: Math.round(filteredTotal * 0.196),
+    negative: Math.round(filteredTotal * 0.117),
     categories: [
-      { name: '智能驾驶', count: 423 },
-      { name: '内饰质感', count: 312 },
-      { name: '续航里程', count: 289 },
-      { name: '充电体验', count: 156 },
-      { name: '售后服务', count: 67 }
+      { name: '智能驾驶', count: Math.round(filteredTotal * 0.339) },
+      { name: '内饰质感', count: Math.round(filteredTotal * 0.250) },
+      { name: '续航里程', count: Math.round(filteredTotal * 0.232) },
+      { name: '充电体验', count: Math.round(filteredTotal * 0.125) },
+      { name: '售后服务', count: Math.round(filteredTotal * 0.054) }
     ]
   };
 
@@ -217,107 +159,6 @@ function CustomerChat() {
 
   return (
     <div className="flex h-full relative">
-      {/* CDP标签库筛选弹窗 */}
-      {editingPersona && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-surface border border-white/10 rounded-xl w-[900px] max-h-[80vh] flex flex-col shadow-2xl">
-            {/* 弹窗头部 */}
-            <div className="px-6 py-4 border-b border-white/10 flex justify-between items-center">
-              <div>
-                <h3 className="text-lg font-bold text-white">调整画像：{editingPersona.name}</h3>
-                <p className="text-xs text-gray-500 mt-1">从CDP标签库中选择标签来精准定义用户画像</p>
-              </div>
-              <button
-                onClick={() => {
-                  setEditingPersona(null);
-                  setSelectedTags([]);
-                }}
-                className="w-8 h-8 bg-surface-hover hover:bg-white/10 rounded flex items-center justify-center text-gray-400 hover:text-white transition-colors"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* CDP标签库内容 */}
-            <div className="flex-1 overflow-y-auto p-6">
-              <div className="grid grid-cols-2 gap-6">
-                {cdpTagLibrary.map((category) => (
-                  <div key={category.id} className="bg-surface-hover rounded-lg p-4">
-                    <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
-                      <span className="w-1 h-4 bg-primary rounded"></span>
-                      {category.name}
-                    </h4>
-                    <div className="space-y-2">
-                      {category.children?.map((tag) => (
-                        <label
-                          key={tag.id}
-                          className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer hover:text-white transition-colors"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selectedTags.includes(tag.name)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedTags(prev => [...prev, tag.name]);
-                              } else {
-                                setSelectedTags(prev => prev.filter(t => t !== tag.name));
-                              }
-                            }}
-                            className="rounded bg-surface border-white/20 text-primary focus:ring-0 w-4 h-4"
-                          />
-                          {tag.name}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* 弹窗底部 */}
-            <div className="px-6 py-4 border-t border-white/10 flex justify-between items-center">
-              <div className="flex gap-4 text-sm">
-                <div className="text-gray-400">
-                  已选标签：<span className="text-white font-bold">{selectedTags.length}</span>
-                </div>
-                <div className="text-gray-400">
-                  匹配用户：<span className="text-primary font-bold">{Math.floor(editingPersona.users * (0.8 + Math.random() * 0.4))}</span>
-                </div>
-                <div className="text-gray-400">
-                  VOC文本：<span className="text-primary font-bold">{Math.floor(editingPersona.vocCount * (0.8 + Math.random() * 0.4))}</span>
-                </div>
-              </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => {
-                    setEditingPersona(null);
-                    setSelectedTags([]);
-                  }}
-                  className="px-4 py-2 bg-surface-hover hover:bg-white/10 rounded-lg text-sm text-gray-300 hover:text-white transition-colors"
-                >
-                  取消
-                </button>
-                <button
-                  onClick={() => {
-                    // 更新画像标签
-                    setPersonas(prev => prev.map(p =>
-                      p.id === editingPersona.id
-                        ? { ...p, tags: selectedTags, users: Math.floor(p.users * (0.8 + Math.random() * 0.4)), vocCount: Math.floor(p.vocCount * (0.8 + Math.random() * 0.4)) }
-                        : p
-                    ));
-                    setEditingPersona(null);
-                    setSelectedTags([]);
-                  }}
-                  className="px-4 py-2 bg-primary hover:bg-primary/90 rounded-lg text-sm text-black font-bold transition-colors"
-                >
-                  确认调整
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* 左侧：VOC数据面板 - 可隐藏 */}
       {isPanelVisible && (
         <div className="w-80 bg-surface border-r border-white/10 flex flex-col">
@@ -372,36 +213,11 @@ function CustomerChat() {
           </div>
         </div>
 
-        {/* 用户画像列表 */}
-        <div className="p-6 border-b border-white/10">
-          <p className="text-xs text-gray-500 font-bold mb-3">用户画像</p>
-          <div className="space-y-2">
-            {personas.map((persona) => (
-              <button
-                key={persona.id}
-                onClick={() => {
-                  setEditingPersona(persona);
-                  setSelectedTags([...persona.tags]);
-                }}
-                className="w-full bg-surface-hover hover:bg-white/10 rounded-lg p-3 transition-colors text-left"
-              >
-                <div className="flex justify-between items-start mb-2">
-                  <span className="text-sm font-bold text-white">{persona.name}</span>
-                  <span className="text-xs text-primary">调整</span>
-                </div>
-                <div className="flex gap-3 text-xs text-gray-400">
-                  <span>{persona.users} users</span>
-                  <span>{persona.vocCount} VOC</span>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-
         {/* 筛选器 */}
         <div className="p-6 flex-1 overflow-y-auto">
           <p className="text-xs text-gray-500 font-bold mb-3">数据筛选</p>
-          <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            {/* 左列：情感倾向 */}
             <div>
               <p className="text-xs text-gray-400 mb-2">情感倾向</p>
               <div className="space-y-1">
@@ -424,19 +240,44 @@ function CustomerChat() {
               </div>
             </div>
 
+            {/* 右列：来源筛选 */}
             <div>
-              <p className="text-xs text-gray-400 mb-2">时间范围</p>
-              <select
-                className="w-full bg-surface-hover border border-white/10 rounded p-2 text-xs text-white outline-none"
-                value={selectedFilters.timeRange}
-                onChange={(e) => setSelectedFilters(prev => ({ ...prev, timeRange: e.target.value }))}
-              >
-                <option value="all">全部时间</option>
-                <option value="week">近一周</option>
-                <option value="month">近一月</option>
-                <option value="quarter">近三月</option>
-              </select>
+              <p className="text-xs text-gray-400 mb-2">数据来源</p>
+              <div className="space-y-1">
+                {Object.keys(vocDataBySource).map((source) => (
+                  <label key={source} className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedFilters.source.includes(source)}
+                      className="rounded bg-surface-hover border-none text-primary focus:ring-0 w-3.5 h-3.5"
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedFilters(prev => ({ ...prev, source: [...prev.source, source] }));
+                        } else {
+                          setSelectedFilters(prev => ({ ...prev, source: prev.source.filter(s => s !== source) }));
+                        }
+                      }}
+                    />
+                    <span>{source}</span>
+                  </label>
+                ))}
+              </div>
             </div>
+          </div>
+
+          {/* 时间范围 - 独立一行 */}
+          <div className="mt-4">
+            <p className="text-xs text-gray-400 mb-2">时间范围</p>
+            <select
+              className="w-full bg-surface-hover border border-white/10 rounded p-2 text-xs text-white outline-none"
+              value={selectedFilters.timeRange}
+              onChange={(e) => setSelectedFilters(prev => ({ ...prev, timeRange: e.target.value }))}
+            >
+              <option value="all">全部时间</option>
+              <option value="week">近一周</option>
+              <option value="month">近一月</option>
+              <option value="quarter">近三月</option>
+            </select>
           </div>
         </div>
       </div>

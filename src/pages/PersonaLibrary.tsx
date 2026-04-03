@@ -11,8 +11,9 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 ).toString();
 
 export default function PersonaLibrary() {
-  const [activeTag, setActiveTag] = useState('全部');
-  const [activeSubTag, setActiveSubTag] = useState<string | null>(null);
+  // 支持多选的状态管理
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [selectedSubTags, setSelectedSubTags] = useState<string[]>([]);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
   const [selectedPdfFile, setSelectedPdfFile] = useState<File | null>(null);
@@ -88,18 +89,18 @@ export default function PersonaLibrary() {
   const filteredPersonas = useMemo(() => {
     let result = allPersonas;
 
-    // 一级标签筛选
-    if (activeTag !== '全部') {
-      result = result.filter(p => p.category === activeTag);
+    // 如果选择了一级分类，进行筛选
+    if (selectedCategories.length > 0) {
+      result = result.filter(p => selectedCategories.includes(p.category));
     }
 
-    // 二级标签筛选
-    if (activeSubTag) {
-      result = result.filter(p => p.subCategory === activeSubTag);
+    // 如果选择了二级标签，进行筛选
+    if (selectedSubTags.length > 0) {
+      result = result.filter(p => selectedSubTags.includes(p.subCategory));
     }
 
     return result;
-  }, [allPersonas, activeTag, activeSubTag]);
+  }, [allPersonas, selectedCategories, selectedSubTags]);
 
   const selectedPersona = useMemo(
     () => allPersonas.find((p) => p.id === selectedPersonaId) ?? null,
@@ -109,6 +110,25 @@ export default function PersonaLibrary() {
   const radarData = selectedPersona
     ? radarLabels.map((label, idx) => ({ subject: label, value: selectedPersona.radar[idx], fullMark: 100 }))
     : [];
+
+  const selectedDimensions = useMemo(() => {
+    return selectedCategories.length + selectedSubTags.length;
+  }, [selectedCategories, selectedSubTags]);
+
+  const dimensionDistribution = useMemo(() => {
+    return tags.slice(1).map((category) => {
+      const count = filteredPersonas.filter(p => p.category === category).length;
+      const shortName = category.replace(/与/g, '').slice(0, 4);
+      return {
+        subject: shortName,
+        count: count,
+        fullName: category,
+        fullMark: Math.max(...tags.slice(1).map(cat =>
+          filteredPersonas.filter(p => p.category === cat).length
+        ), 10)
+      };
+    });
+  }, [filteredPersonas, tags]);
 
   const onPickPdf = (file: File | null) => {
     if (!file) return;
@@ -123,6 +143,35 @@ export default function PersonaLibrary() {
       return;
     }
     setSelectedPdfFile(file);
+  };
+
+  // 处理一级分类点击
+  const toggleCategory = (category: string) => {
+    setSelectedCategories(prev =>
+      prev.includes(category)
+        ? prev.filter(c => c !== category)
+        : [...prev, category]
+    );
+  };
+
+  // 处理二级标签点击
+  const toggleSubTag = (category: string, subTag: string) => {
+    // 确保对应的一级分类也被选中
+    if (!selectedCategories.includes(category)) {
+      setSelectedCategories(prev => [...prev, category]);
+    }
+
+    setSelectedSubTags(prev =>
+      prev.includes(subTag)
+        ? prev.filter(t => t !== subTag)
+        : [...prev, subTag]
+    );
+  };
+
+  // 重置所有筛选
+  const resetFilters = () => {
+    setSelectedCategories([]);
+    setSelectedSubTags([]);
   };
 
   const extractPdfText = async (file: File) => {
@@ -182,8 +231,11 @@ export default function PersonaLibrary() {
 
   if (selectedPersona) {
     return (
-      <div className="p-10 max-w-7xl mx-auto">
-        <button onClick={() => setSelectedPersonaId(null)} className="mb-6 px-4 py-2 bg-surface hover:bg-surface-hover rounded text-sm flex items-center gap-2">
+      <div className="p-10 max-w-7xl mx-auto min-h-screen">
+        <button
+          onClick={() => setSelectedPersonaId(null)}
+          className="mb-6 px-4 py-2 bg-surface hover:bg-surface-hover rounded text-sm flex items-center gap-2 text-white"
+        >
           <ArrowLeft size={16} />
           返回人设列表
         </button>
@@ -208,8 +260,8 @@ export default function PersonaLibrary() {
           </div>
           <div className="col-span-12 bg-surface rounded-xl p-6">
             <h3 className="text-lg font-bold text-white mb-4">七维评分雷达图</h3>
-            <div className="h-[420px]">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="h-[420px] min-h-[320px] min-w-0">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={320}>
                 <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
                   <PolarGrid stroke="#3b3b3b" />
                   <PolarAngleAxis dataKey="subject" tick={{ fill: '#9ca3af', fontSize: 12 }} />
@@ -226,7 +278,7 @@ export default function PersonaLibrary() {
 
   return (
     <div className="p-10 max-w-7xl mx-auto">
-      <div className="flex justify-between items-end mb-12">
+      <div className="flex justify-between items-end mb-8">
         <div>
           <h1 className="text-4xl font-extrabold text-white mb-2">人设库管理</h1>
         </div>
@@ -239,117 +291,225 @@ export default function PersonaLibrary() {
         </button>
       </div>
 
+      {/* 左右布局：左侧筛选，右侧统计 */}
       <div className="grid grid-cols-12 gap-6 mb-8">
-        <div className="col-span-7 bg-surface p-6 rounded-xl">
-          <p className="text-gray-500 text-xs font-bold mb-4">标签筛选</p>
+        {/* 左侧：标签筛选 */}
+        <div className="col-span-5 bg-surface p-6 rounded-xl">
+          <p className="text-white text-lg font-bold mb-6">标签筛选</p>
 
-          {/* 显示所有一级标签及其二级标签 */}
-          <div className="space-y-4">
-            {tags.slice(1).map(tag => (
-              <div key={tag} className="space-y-2">
+          {/* 身份与基础属性 */}
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-white font-bold text-sm">身份与基础属性</h3>
+              <span className="text-gray-500 text-xs">38</span>
+            </div>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {['年龄段', '职业类型', '收入水平', '教育背景', '家庭结构'].map(tag => (
                 <button
-                  onClick={() => {
-                    setActiveTag(tag);
-                    setActiveSubTag(null);
-                  }}
-                  className={`px-4 py-2 text-xs font-bold rounded transition-colors ${activeTag === tag ? 'bg-primary text-black' : 'bg-surface-hover text-gray-300 hover:bg-[#353534]'}`}
+                  key={tag}
+                  onClick={() => toggleSubTag('身份与基础属性', tag)}
+                  className={`px-3 py-1.5 text-xs rounded transition-colors ${
+                    selectedSubTags.includes(tag)
+                      ? 'bg-primary text-black'
+                      : 'bg-surface-hover text-gray-300 hover:bg-[#353534]'
+                  }`}
                 >
                   {tag}
                 </button>
-
-                {/* 该一级标签下的所有二级标签 */}
-                {subTags[tag] && (
-                  <div className="flex flex-wrap gap-2 ml-4">
-                    {subTags[tag].map(subTag => (
-                      <button
-                        key={subTag}
-                        onClick={() => {
-                          setActiveTag(tag);
-                          setActiveSubTag(subTag);
-                        }}
-                        className={`px-3 py-1.5 text-xs rounded transition-colors ${
-                          activeTag === tag && activeSubTag === subTag
-                            ? 'bg-primary/20 text-primary border border-primary'
-                            : 'bg-surface-hover/50 text-gray-400 hover:bg-surface-hover'
-                        }`}
-                      >
-                        {subTag}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-
-            {/* 全部标签 */}
-            <button
-              onClick={() => {
-                setActiveTag('全部');
-                setActiveSubTag(null);
-              }}
-              className={`px-4 py-2 text-xs font-bold rounded transition-colors ${activeTag === '全部' ? 'bg-primary text-black' : 'bg-surface-hover text-gray-300 hover:bg-[#353534]'}`}
-            >
-              全部
-            </button>
+              ))}
+            </div>
           </div>
+
+          {/* 社会与人口统计 */}
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-white font-bold text-sm">社会与人口统计</h3>
+              <span className="text-gray-500 text-xs">35</span>
+            </div>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {['城市等级', '居住区域', '婚姻状况', '子女情况', '生活方式'].map(tag => (
+                <button
+                  key={tag}
+                  onClick={() => toggleSubTag('社会与人口统计', tag)}
+                  className={`px-3 py-1.5 text-xs rounded transition-colors ${
+                    selectedSubTags.includes(tag)
+                      ? 'bg-primary text-black'
+                      : 'bg-surface-hover text-gray-300 hover:bg-[#353534]'
+                  }`}
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 购车决策与潜客行为 */}
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-white font-bold text-sm">购车决策与潜客行为</h3>
+              <span className="text-gray-500 text-xs">30</span>
+            </div>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {['购车动机', '决策周期', '信息渠道', '试驾偏好', '价格敏感度'].map(tag => (
+                <button
+                  key={tag}
+                  onClick={() => toggleSubTag('购车决策与潜客行为', tag)}
+                  className={`px-3 py-1.5 text-xs rounded transition-colors ${
+                    selectedSubTags.includes(tag)
+                      ? 'bg-primary text-black'
+                      : 'bg-surface-hover text-gray-300 hover:bg-[#353534]'
+                  }`}
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 车辆使用与售后服务 */}
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-white font-bold text-sm">车辆使用与售后服务</h3>
+              <span className="text-gray-500 text-xs">22</span>
+            </div>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {['用车场景', '里程需求', '保养频率', '服务期望', '品牌忠诚度'].map(tag => (
+                <button
+                  key={tag}
+                  onClick={() => toggleSubTag('车辆使用与售后服务', tag)}
+                  className={`px-3 py-1.5 text-xs rounded transition-colors ${
+                    selectedSubTags.includes(tag)
+                      ? 'bg-primary text-black'
+                      : 'bg-surface-hover text-gray-300 hover:bg-[#353534]'
+                  }`}
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 数字触点与线上行为 */}
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-white font-bold text-sm">数字触点与线上行为</h3>
+              <span className="text-gray-500 text-xs">18</span>
+            </div>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {['社交平台', '内容偏好', '互动频率', '设备使用', '数字素养'].map(tag => (
+                <button
+                  key={tag}
+                  onClick={() => toggleSubTag('数字触点与线上行为', tag)}
+                  className={`px-3 py-1.5 text-xs rounded transition-colors ${
+                    selectedSubTags.includes(tag)
+                      ? 'bg-primary text-black'
+                      : 'bg-surface-hover text-gray-300 hover:bg-[#353534]'
+                  }`}
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 品牌认知与情感连接 */}
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-white font-bold text-sm">品牌认知与情感连接</h3>
+              <span className="text-gray-500 text-xs">12</span>
+            </div>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {['品牌认知', '情感倾向', '价值观匹配', '推荐意愿', '社群参与'].map(tag => (
+                <button
+                  key={tag}
+                  onClick={() => toggleSubTag('品牌认知与情感连接', tag)}
+                  className={`px-3 py-1.5 text-xs rounded transition-colors ${
+                    selectedSubTags.includes(tag)
+                      ? 'bg-primary text-black'
+                      : 'bg-surface-hover text-gray-300 hover:bg-[#353534]'
+                  }`}
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 全部按钮 */}
+          <button
+            onClick={resetFilters}
+            className={`w-full px-4 py-2.5 text-sm font-bold rounded transition-colors ${
+              selectedCategories.length === 0 && selectedSubTags.length === 0
+                ? 'bg-primary text-black'
+                : 'bg-surface-hover text-gray-300 hover:bg-[#353534]'
+            }`}
+          >
+            全部
+          </button>
         </div>
 
-        <div className="col-span-5 bg-surface rounded-xl overflow-hidden">
-          <div className="grid grid-rows-[auto_1fr] h-full">
-            {/* 人设总资产 */}
-            <div className="p-6 border-b border-white/5">
-              <p className="text-gray-500 text-xs font-bold mb-2">人设总资产</p>
-              <h2 className="text-5xl font-extrabold text-white">{allPersonas.length}</h2>
-            </div>
-
-            {/* 六维雷达图 */}
-            <div className="p-6 flex flex-col min-h-[320px]">
-              <p className="text-gray-500 text-xs font-bold mb-3">人设分布六维图</p>
-              <div className="flex-1">
-                <ResponsiveContainer width="100%" height="100%">
-                  <RadarChart data={tags.slice(1).map((category) => {
-                    const count = allPersonas.filter(p => p.category === category).length;
-                    const subCategoryCount = subTags[category]?.length || 0;
-                    const coveredSubCategories = new Set(
-                      allPersonas.filter(p => p.category === category).map(p => p.subCategory)
-                    ).size;
-                    const coverage = subCategoryCount > 0 ? (coveredSubCategories / subCategoryCount) * 100 : 0;
-
-                    // 缩短名称用于显示
-                    const shortName = category.length > 8 ? category.slice(0, 4) + '...' : category;
-
-                    return {
-                      subject: shortName,
-                      count: count,
-                      coverage: coverage,
-                      fullName: category,
-                      fullMark: 15
-                    };
-                  })}>
-                    <PolarGrid stroke="#3b3b3b" />
-                    <PolarAngleAxis
-                      dataKey="subject"
-                      tick={{ fill: '#9ca3af', fontSize: 11 }}
-                    />
-                    <PolarRadiusAxis angle={30} domain={[0, 15]} tick={false} axisLine={false} />
-                    <Radar
-                      name="人设数量"
-                      dataKey="count"
-                      stroke="#63fe33"
-                      fill="#63fe33"
-                      fillOpacity={0.3}
-                    />
-                    <Radar
-                      name="维度覆盖"
-                      dataKey="coverage"
-                      stroke="#fbbf24"
-                      fill="#fbbf24"
-                      fillOpacity={0.15}
-                      scale={0.15}
-                    />
-                  </RadarChart>
-                </ResponsiveContainer>
+        {/* 右侧：统计信息 */}
+        <div className="col-span-7 bg-surface rounded-xl p-6">
+          {/* 顶部统计卡片 */}
+          <div className="grid grid-cols-2 gap-6 mb-6">
+            <div>
+              <p className="text-gray-400 text-sm mb-2">人设总数</p>
+              <div className="flex items-baseline gap-2">
+                <h2 className="text-5xl font-extrabold text-white">{filteredPersonas.length}</h2>
+                <span className="text-gray-500 text-sm">已筛选</span>
               </div>
+            </div>
+            <div>
+              <p className="text-gray-400 text-sm mb-2">已选维度</p>
+              <div className="flex items-baseline gap-2">
+                <h2 className="text-5xl font-extrabold text-white">{selectedDimensions}</h2>
+                <div className="text-gray-500 text-sm max-w-[200px] truncate">
+                  {selectedCategories.length > 0 && selectedCategories.join(', ')}
+                  {selectedSubTags.length > 0 && `, ${selectedSubTags.join(', ')}`}
+                  {selectedDimensions === 0 && '未选择'}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 各维度人设分布雷达图 */}
+          <div>
+            <p className="text-gray-400 text-sm mb-4">各维度人设分布</p>
+            <div className="h-[420px] min-h-[320px] min-w-0 relative">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={320}>
+                <RadarChart data={dimensionDistribution}>
+                  <PolarGrid stroke="#3b3b3b" />
+                  <PolarAngleAxis
+                    dataKey="subject"
+                    tick={{ fill: '#9ca3af', fontSize: 12 }}
+                  />
+                  <PolarRadiusAxis angle={30} domain={[0, 'auto']} tick={false} axisLine={false} />
+                  <Radar
+                    name="人设数量"
+                    dataKey="count"
+                    stroke="#63fe33"
+                    fill="#63fe33"
+                    fillOpacity={0.3}
+                    label={({ cx, cy, x, y, value }) => {
+                      // 在雷达图的每个顶点显示数量
+                      const offsetX = x > cx ? 15 : -15;
+                      const offsetY = y > cy ? 15 : -15;
+                      return (
+                        <text
+                          x={x + offsetX}
+                          y={y + offsetY}
+                          fill="#63fe33"
+                          fontSize={14}
+                          fontWeight="bold"
+                          textAnchor={x > cx ? 'start' : 'end'}
+                        >
+                          {value}
+                        </text>
+                      );
+                    }}
+                  />
+                </RadarChart>
+              </ResponsiveContainer>
             </div>
           </div>
         </div>
@@ -357,7 +517,11 @@ export default function PersonaLibrary() {
 
       <div className="grid grid-cols-3 gap-6">
         {filteredPersonas.map((p) => (
-          <button key={p.id} onClick={() => setSelectedPersonaId(p.id)} className="bg-surface p-6 rounded-xl relative group text-left hover:bg-surface-hover transition-colors">
+          <button
+            key={p.id}
+            onClick={() => setSelectedPersonaId(p.id)}
+            className="bg-surface p-6 rounded-xl relative group text-left hover:bg-surface-hover transition-colors"
+          >
             <h3 className="text-2xl font-bold text-white mb-3">{p.name}</h3>
             <div className="flex gap-2 mb-8">
               <span className="px-2 py-1 bg-blue-500/20 text-blue-400 text-xs rounded">{p.tags[0]}</span>

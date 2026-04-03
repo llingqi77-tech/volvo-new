@@ -37,10 +37,9 @@ export default function App() {
   const [activeModule, setActiveModule] = useState('knowledge');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [docs, setDocs] = useState<KnowledgeDoc[]>([
-    // 洞察报告库 (15个)
+    // 洞察报告库 (14个)
     { id: 'doc-1', title: '2024年全球纯电SUV市场趋势深度调研', type: 'PDF • 14.2 MB • 2024-11-24', tags: ['电动化', 'SUV'], uploader: '王安德', color: 'text-primary', category: '洞察报告库', summary: '本报告深入分析了2024年全球纯电SUV市场的发展趋势，涵盖市场规模、消费者偏好、技术创新和竞争格局。研究发现，中国和欧洲市场增长最快，智能化和续航能力成为核心竞争力。', uploadDate: '2024-11-24', fileSize: '14.2 MB' },
     { id: 'doc-2', title: '年轻消费者新能源车购买决策研究', type: 'PDF • 8.5 MB • 2024-11-20', tags: ['消费者洞察', '年轻人'], uploader: '李雅婷', color: 'text-primary', category: '洞察报告库', summary: '针对18-35岁年轻消费群体的深度访谈研究，揭示了年轻人在购买新能源车时的核心关注点、决策路径和痛点。智能化体验、品牌价值观和社交属性是关键影响因素。', uploadDate: '2024-11-20', fileSize: '8.5 MB' },
-    { id: 'doc-3', title: '豪华电动车用户画像与需求分析', type: 'PDF • 12.3 MB • 2024-11-18', tags: ['用户画像', '豪华车'], uploader: '陈思远', color: 'text-primary', category: '洞察报告库', summary: '基于500+豪华电动车车主的问卷调查和深度访谈，构建了5类典型用户画像。高净值人群更关注品牌传承、安全性能和专属服务体验。', uploadDate: '2024-11-18', fileSize: '12.3 MB' },
     { id: 'doc-4', title: '北欧市场电动车消费趋势报告', type: 'PDF • 9.7 MB • 2024-11-15', tags: ['北欧市场', '趋势'], uploader: '林索菲', color: 'text-primary', category: '洞察报告库', summary: '北欧作为电动车渗透率最高的地区，消费者对可持续性、环保材料和能源效率有极高要求。报告分析了瑞典、挪威、丹麦三国的市场特点和消费偏好。', uploadDate: '2024-11-15', fileSize: '9.7 MB' },
     { id: 'doc-5', title: '智能座舱用户体验评测报告', type: 'PDF • 15.8 MB • 2024-11-12', tags: ['智能座舱', 'UX'], uploader: '张逸豪', color: 'text-primary', category: '洞察报告库', summary: '对市场主流智能座舱系统进行了全面评测，从交互设计、语音助手、车机性能、生态整合四个维度进行对比分析。用户最看重的是响应速度和操作逻辑的简洁性。', uploadDate: '2024-11-12', fileSize: '15.8 MB' },
     { id: 'doc-6', title: '女性用户购车决策影响因素研究', type: 'PDF • 7.2 MB • 2024-11-10', tags: ['女性用户', '决策'], uploader: '周慧敏', color: 'text-primary', category: '洞察报告库', summary: '女性消费者在购车决策中展现出独特的关注点：安全性、颜值设计、易用性和售后服务质量。研究发现女性更倾向于口碑推荐和真实用户评价。', uploadDate: '2024-11-10', fileSize: '7.2 MB' },
