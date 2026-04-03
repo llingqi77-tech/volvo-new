@@ -597,7 +597,7 @@ export default function PersonaLibrary() {
             <FileUp className="text-primary mb-4" size={40} />
             <p className="text-white font-bold mb-2">点击或拖拽 PDF 至此</p>
             <p className="text-gray-500 text-xs mb-1">系统将自动解析 PDF 内容生成人设</p>
-            <p className="text-gray-500 text-xs">支持 PDF 格式，最大 20MB</p>
+              <p className="text-gray-500 text-xs">支持批量上传PDF，最大20MB/个</p>
             {selectedPdfFiles.length > 0 && (
               <div className="text-xs text-primary mt-3 w-full">
                 <p>已选择：{selectedPdfFiles.length} 个 PDF</p>
