@@ -5,8 +5,11 @@ import {defineConfig, loadEnv} from 'vite';
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
+  const isVercel = !!process.env.VERCEL_URL || process.env.VERCEL === '1';
+  // Vercel 默认部署在根路径；GitHub Pages 通常部署在 /volvo-new/ 子路径
+  const base = env.VITE_BASE || (isVercel ? '/' : '/volvo-new/');
   return {
-    base: '/volvo-new/',
+    base,
     plugins: [react(), tailwindcss()],
     define: {
       'process.env.DEEPSEEK_API_KEY': JSON.stringify(env.DEEPSEEK_API_KEY ?? ''),
