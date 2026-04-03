@@ -120,9 +120,10 @@ export async function streamChatCompletion(
  * Non-streaming chat completion (for simple use cases)
  *
  * @param messages - Array of chat messages
+ * @param timeoutMs - OpenRouter 请求超时；长文案生成（如调研方案）需 120s+
  * @returns Complete response text
  */
-export async function chatCompletion(messages: Message[]): Promise<string> {
+export async function chatCompletion(messages: Message[], timeoutMs = 90000): Promise<string> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   const model = process.env.OPENROUTER_MODEL || 'stepfun/step-3.5-flash:free';
   const apiUrl = getApiUrl();
@@ -131,32 +132,40 @@ export async function chatCompletion(messages: Message[]): Promise<string> {
     throw new Error('OPENROUTER_API_KEY is not configured');
   }
 
-  console.log('API Request:', { apiUrl, model, messageCount: messages.length });
+  console.log('API Request:', { apiUrl, model, messageCount: messages.length, timeoutMs });
 
-  const response = await fetch(apiUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-      'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000',
-      'X-Title': 'Volvo Research Workbench',
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      stream: false,
-      temperature: 0.7,
-      max_tokens: 4096,
-    }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(
-      `OpenRouter API error: ${response.status} ${response.statusText}. ${JSON.stringify(errorData)}`
-    );
+  try {
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000',
+        'X-Title': 'Volvo Research Workbench',
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        stream: false,
+        temperature: 0.7,
+        max_tokens: 4096,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(
+        `OpenRouter API error: ${response.status} ${response.statusText}. ${JSON.stringify(errorData)}`
+      );
+    }
+
+    const data = await response.json();
+    return data.choices?.[0]?.message?.content || '';
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content || '';
 }

@@ -65,49 +65,61 @@ function CustomerChat() {
     '舆情系统': 162
   };
 
-  // 计算筛选后的总数据量
-  const filteredTotal = useMemo(() => {
-    let baseTotal = 1247;
+  const BASE_TOTAL = 1247;
+  const sentimentBase = {
+    '正面': Math.round(BASE_TOTAL * 0.686),
+    '中性': Math.round(BASE_TOTAL * 0.196),
+    '负面': Math.round(BASE_TOTAL * 0.117)
+  };
 
-    // 按来源筛选
+  // 计算筛选后的VOC统计数据（情感、来源、时间正确联动）
+  const vocStats = useMemo(() => {
+    // 1. 按来源筛选确定基数
+    let sourceTotal = BASE_TOTAL;
     if (selectedFilters.source.length > 0) {
-      baseTotal = selectedFilters.source.reduce((sum, source) => {
+      sourceTotal = selectedFilters.source.reduce((sum, source) => {
         return sum + (vocDataBySource[source as keyof typeof vocDataBySource] || 0);
       }, 0);
     }
+    const sourceRatio = sourceTotal / BASE_TOTAL;
 
-    // 按情感倾向筛选
-    if (selectedFilters.sentiment.length > 0) {
-      const sentimentRatio = selectedFilters.sentiment.length / 3; // 3种情感
-      baseTotal = Math.round(baseTotal * sentimentRatio);
-    }
-
-    // 按时间范围筛选
+    // 2. 按时间范围筛选
     const timeRatios: Record<string, number> = {
       'all': 1.0,
       'week': 0.15,
       'month': 0.35,
       'quarter': 0.65
     };
-    baseTotal = Math.round(baseTotal * (timeRatios[selectedFilters.timeRange] || 1.0));
+    const timeRatio = timeRatios[selectedFilters.timeRange] || 1.0;
 
-    return baseTotal;
-  }, [selectedFilters.source, selectedFilters.sentiment, selectedFilters.timeRange]);
+    // 3. 计算各情感在来源+时间筛选后的数量
+    const positive = Math.round(sentimentBase['正面'] * sourceRatio * timeRatio);
+    const neutral = Math.round(sentimentBase['中性'] * sourceRatio * timeRatio);
+    const negative = Math.round(sentimentBase['负面'] * sourceRatio * timeRatio);
 
-  // 模拟VOC数据统计
-  const vocStats = {
-    total: filteredTotal,
-    positive: Math.round(filteredTotal * 0.686),
-    neutral: Math.round(filteredTotal * 0.196),
-    negative: Math.round(filteredTotal * 0.117),
-    categories: [
-      { name: '智能驾驶', count: Math.round(filteredTotal * 0.339) },
-      { name: '内饰质感', count: Math.round(filteredTotal * 0.250) },
-      { name: '续航里程', count: Math.round(filteredTotal * 0.232) },
-      { name: '充电体验', count: Math.round(filteredTotal * 0.125) },
-      { name: '售后服务', count: Math.round(filteredTotal * 0.054) }
-    ]
-  };
+    // 4. 按情感倾向筛选：未选中的置为0（全不选视为全选）
+    const finalPositive = selectedFilters.sentiment.length === 0 || selectedFilters.sentiment.includes('正面') ? positive : 0;
+    const finalNeutral = selectedFilters.sentiment.length === 0 || selectedFilters.sentiment.includes('中性') ? neutral : 0;
+    const finalNegative = selectedFilters.sentiment.length === 0 || selectedFilters.sentiment.includes('负面') ? negative : 0;
+
+    const total = finalPositive + finalNeutral + finalNegative;
+
+    const categories = [
+      { name: '智能驾驶', count: Math.round(BASE_TOTAL * 0.339 * sourceRatio * timeRatio) },
+      { name: '内饰质感', count: Math.round(BASE_TOTAL * 0.250 * sourceRatio * timeRatio) },
+      { name: '续航里程', count: Math.round(BASE_TOTAL * 0.232 * sourceRatio * timeRatio) },
+      { name: '充电体验', count: Math.round(BASE_TOTAL * 0.125 * sourceRatio * timeRatio) },
+      { name: '售后服务', count: Math.round(BASE_TOTAL * 0.054 * sourceRatio * timeRatio) }
+    ];
+
+    return {
+      total,
+      positive: finalPositive,
+      neutral: finalNeutral,
+      negative: finalNegative,
+      categories
+    };
+  }, [selectedFilters]);
 
   const handleSend = () => {
     const question = input.trim();
@@ -122,19 +134,28 @@ function CustomerChat() {
     setTimeout(() => {
       setIsAnalyzing(false);
 
+      const totalCount = vocStats.total;
+      const posPct = totalCount > 0 ? ((vocStats.positive / totalCount) * 100).toFixed(1) : '0.0';
+      const neuPct = totalCount > 0 ? ((vocStats.neutral / totalCount) * 100).toFixed(1) : '0.0';
+      const negPct = totalCount > 0 ? ((vocStats.negative / totalCount) * 100).toFixed(1) : '0.0';
+
+      const posLine = vocStats.positive > 0 ? `• 正面评价：${posPct}%（主要集中在安全配置和北欧设计）` : '';
+      const neuLine = vocStats.neutral > 0 ? `• 中性描述：${neuPct}%（功能性描述为主）` : '';
+      const negLine = vocStats.negative > 0 ? `• 负面反馈：${negPct}%（主要关于充电便利性和价格）` : '';
+
+      const sentimentLines = [posLine, neuLine, negLine].filter(Boolean).join('\n');
+
       const response = `基于 ${vocStats.total} 条 VOC 数据的分析结果：
 
 关于"${question}"的用户洞察：
 
 高频关键词：
-• 智能驾驶安全性（提及 423 次）
-• 内饰质感与静谧性（提及 312 次）
-• 续航里程焦虑（提及 289 次）
+• 智能驾驶安全性（提及 ${Math.round(totalCount * 0.339)} 次）
+• 内饰质感与静谧性（提及 ${Math.round(totalCount * 0.250)} 次）
+• 续航里程焦虑（提及 ${Math.round(totalCount * 0.232)} 次）
 
 情感分布：
-• 正面评价：68.6%（主要集中在安全配置和北欧设计）
-• 中性描述：19.6%（功能性描述为主）
-• 负面反馈：11.7%（主要关于充电便利性和价格）
+${sentimentLines || '• 当前筛选条件下暂无情感分布数据'}
 
 典型用户声音：
 "沃尔沃的主动安全系统让我在复杂路况下更有信心，这是我选择它的核心原因。"

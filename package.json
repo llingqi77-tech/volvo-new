@@ -4,9 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --port=3000 --host=0.0.0.0",
+    "dev": "concurrently -n web,api -c blue,green \"npm run dev:client\" \"npm run api\"",
+    "dev:client": "vite --port=3000 --host=0.0.0.0",
     "api": "tsx src/api/server.ts",
-    "dev:all": "concurrently \"npm run dev\" \"npm run api\"",
+    "dev:all": "npm run dev",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",

@@ -2,6 +2,46 @@ import { useRef, useState, useEffect } from 'react';
 import { Command, Paperclip, Mic, ArrowRight, Upload, FileText, Share2, Download, User } from 'lucide-react';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer } from 'recharts';
 
+/** 与 API `classify-research` 失败时的 fallback 对齐，用于前端离线降级 */
+const OFFLINE_RESEARCH_CLASSIFICATION = {
+  kind: '探索型研究',
+  framework: 'JTBD + 用户旅程地图',
+  rationale: '无法连接研究分类服务时的默认框架。请确认本机已启动 API（`npm run dev` 会同时启动前端与 API）。',
+  confidence: 'low',
+};
+
+function fallbackVerifyQuestion(round: number): {
+  id: string;
+  mode: 'single';
+  title: string;
+  options: string[];
+} {
+  const id = `fallback-q${round}-${Date.now()}`;
+  switch (round) {
+    case 1:
+      return {
+        id,
+        mode: 'single',
+        title: '您的研究主要面向哪些人群？',
+        options: ['年轻用户（18-30岁）', '中青年用户（25-40岁）', '中年用户（35-50岁）', '全年龄段'],
+      };
+    case 2:
+      return {
+        id,
+        mode: 'single',
+        title: '研究主要发生在什么场景？',
+        options: ['日常生活', '工作/商务', '购物决策', '线上线下结合'],
+      };
+    default:
+      return {
+        id,
+        mode: 'single',
+        title: `请确认第 ${round} 个研究维度（离线占位，可稍后重试）`,
+        options: ['侧重用户体验', '侧重转化与增长', '侧重品牌认知', '其他'],
+      };
+  }
+}
+
 export default function FormalResearch({ isSidebarCollapsed = false }: { isSidebarCollapsed?: boolean }) {
   const [step, setStep] = useState(1);
   const [userInput, setUserInput] = useState('');
@@ -12,11 +52,12 @@ export default function FormalResearch({ isSidebarCollapsed = false }: { isSideb
     confidence: string;
   } | null>(null);
   const [verificationAnswers, setVerificationAnswers] = useState<Array<{ question: string; answer: string[] }>>([]);
+  const [selectedPlanVersion, setSelectedPlanVersion] = useState<any>(null);
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {step === 1 && <StepStart onNext={(input: string) => { setUserInput(input); setStep(2); }} />}
-      {step === 2 && <StepVerifyAndPlan userInput={userInput} onNext={(cls, answers) => { setClassification(cls); setVerificationAnswers(answers); setStep(3); }} />}
+      {step === 2 && <StepVerifyAndPlan userInput={userInput} onNext={(cls, answers, version) => { setClassification(cls); setVerificationAnswers(answers); setSelectedPlanVersion(version); setStep(3); }} />}
       {step === 3 && <StepAudience onNext={() => setStep(4)} />}
       {step === 4 && <StepConfirm onNext={() => setStep(5)} />}
       {step === 5 && <StepReport />}
@@ -112,8 +153,10 @@ function StepStart({ onNext }: { onNext: (input: string) => void }) {
   );
 }
 
-function StepVerifyAndPlan({ userInput, onNext }: { userInput: string; onNext: (classification: any, answers: Array<{ question: string; answer: string[] }>) => void }) {
+function StepVerifyAndPlan({ userInput, onNext }: { userInput: string; onNext: (classification: any, answers: Array<{ question: string; answer: string[] }>, version: any) => void }) {
   type Question = { id: string; mode: 'single' | 'multi' | 'multiple'; title: string; options: string[] };
+  type ArtifactVersion = { version: number; plan: any; interview: any[]; fullContent: string; createdAt: string };
+
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
@@ -124,149 +167,112 @@ function StepVerifyAndPlan({ userInput, onNext }: { userInput: string; onNext: (
   const [selectedArtifact, setSelectedArtifact] = useState<'plan' | 'interview' | null>(null);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [isPanelVisible, setIsPanelVisible] = useState(false);
+
+  const [versions, setVersions] = useState<ArtifactVersion[]>([]);
+  const [selectedVersionIndex, setSelectedVersionIndex] = useState(0);
+
+  const [refineMode, setRefineMode] = useState<'idle' | 'questioning' | 'generating'>('idle');
+  const [refineInput, setRefineInput] = useState('');
+  const [refineQuestions, setRefineQuestions] = useState<Question[]>([]);
+  const [refineAnswers, setRefineAnswers] = useState<Record<string, string[]>>({});
+  const [refineCurrentIndex, setRefineCurrentIndex] = useState(0);
+
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [currentIndex, isThinking, thinkingSteps]);
-
-  const simulateThinkingProcess = (roundNumber: number) => {
-    const thinkingProcesses = [
-      [
-        '分析用户输入的研究问题...',
-        '识别核心研究维度：目标人群、研究场景、关注点',
-        '基于研究类型，确定首要澄清的参数',
-        '生成第一个核验问题'
-      ],
-      [
-        '整合前一轮的回答...',
-        '评估已确认的研究参数完整性',
-        '识别尚未明确的关键维度',
-        '设计针对性的追问策略',
-        '生成下一个核验问题'
-      ],
-      [
-        '综合分析前两轮的回答...',
-        '构建初步的研究框架雏形',
-        '识别潜在的研究盲区',
-        '确定需要进一步细化的方向',
-        '生成第三个核验问题'
-      ],
-      [
-        '回顾已收集的所有参数...',
-        '评估研究方案的可行性',
-        '识别执行层面的关键细节',
-        '确定最后需要确认的要素',
-        '生成第四个核验问题'
-      ],
-      [
-        '整合所有核验结果...',
-        '验证研究参数的一致性和完整性',
-        '确认最后的关键假设',
-        '生成最终核验问题'
-      ]
-    ];
-
-    const steps = thinkingProcesses[Math.min(roundNumber, 4)];
-    setThinkingSteps([]);
-
-    steps.forEach((step, idx) => {
-      setTimeout(() => {
-        setThinkingSteps(prev => [...prev, step]);
-      }, idx * 600);
-    });
-
-    return steps.length * 600;
-  };
-
-  const generateNextQuestion = async (cls: any, previousAnswers: Array<{ question: string; answer: string[] }>) => {
+  const fetchWithTimeout = async (url: string, options: Record<string, any> = {}, timeout = 60000) => {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
     try {
-      const response = await fetch('/api/generate-question', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userInput,
-          classification: cls,
-          previousAnswers,
-          round: previousAnswers.length + 1,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`API 返回错误: ${response.status}`);
-      }
-
-      const result = await response.json();
-
-      if (result.error) {
-        throw new Error(result.error);
-      }
-
-      return result.question;
-    } catch (error) {
-      console.error('生成问题失败:', error);
-      return {
-        id: `q${previousAnswers.length + 1}`,
-        mode: 'single' as const,
-        title: `请选择第 ${previousAnswers.length + 1} 个研究参数`,
-        options: ['选项 A', '选项 B', '选项 C', '选项 D'],
-      };
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      if (!res.ok) throw new Error('请求失败: ' + res.status);
+      return res;
+    } finally {
+      clearTimeout(id);
     }
   };
 
   useEffect(() => {
-    const classifyResearch = async () => {
-      try {
-        const response = await fetch('/api/classify-research', {
+    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [currentIndex, isThinking, thinkingSteps, refineMode, refineCurrentIndex]);
+
+  const simulateThinkingProcess = (roundNumber: number) => {
+    const thinkingProcesses = [
+      ['分析用户输入的研究问题...','识别核心研究维度：目标人群、研究场景、关注点','基于研究类型，确定首要澄清的参数','生成第一个核验问题'],
+      ['整合前一轮的回答...','评估已确认的研究参数完整性','识别尚未明确的关键维度','设计针对性的追问策略','生成下一个核验问题'],
+      ['综合分析前两轮的回答...','构建初步的研究框架雏形','识别潜在的研究盲区','确定需要进一步细化的方向','生成第三个核验问题'],
+      ['回顾已收集的所有参数...','评估研究方案的可行性','识别执行层面的关键细节','确定最后需要确认的要素','生成第四个核验问题'],
+      ['整合所有核验结果...','验证研究参数的一致性和完整性','确认最后的关键假设','生成最终核验问题']
+    ];
+    const steps = thinkingProcesses[Math.min(roundNumber, 4)];
+    setThinkingSteps([]);
+    steps.forEach((step, idx) => setTimeout(() => setThinkingSteps(prev => [...prev, step]), idx * 600));
+    return steps.length * 600;
+  };
+
+  const classifyResearch = async () => {
+    try {
+      const res = await fetchWithTimeout(
+        '/api/classify-research',
+        {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userInput }),
-        });
-        const result = await response.json();
-        setClassification(result);
+        },
+        90000,
+      );
+      const data = await res.json();
+      setClassification(data);
+      const firstQuestion = await generateNextQuestion(data, []);
+      setQuestions([firstQuestion]);
+    } catch (e) {
+      console.error(e);
+      setClassification({ ...OFFLINE_RESEARCH_CLASSIFICATION });
+      const firstQuestion = await generateNextQuestion(OFFLINE_RESEARCH_CLASSIFICATION, []);
+      setQuestions([firstQuestion]);
+    } finally {
+      setIsClassifying(false);
+    }
+  };
 
-        const firstQuestion = await generateNextQuestion(result, []);
-        setQuestions([firstQuestion]);
-        setIsClassifying(false);
-      } catch (error) {
-        console.error('分类失败:', error);
-        setIsClassifying(false);
-      }
-    };
-    classifyResearch();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userInput]);
+  const generateNextQuestion = async (cls: any, previousAnswers: Array<{ question: string; answer: string[] }>): Promise<Question> => {
+    const round = previousAnswers.length + 1;
+    try {
+      const res = await fetchWithTimeout(
+        '/api/generate-question',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userInput, classification: cls, previousAnswers, round }),
+        },
+        90000,
+      );
+      const data = await res.json();
+      const q = data.question;
+      return { id: q.id || 'q-' + Date.now(), mode: q.mode || 'single', title: q.title, options: q.options };
+    } catch {
+      const fb = fallbackVerifyQuestion(round);
+      return { id: fb.id, mode: fb.mode, title: fb.title, options: fb.options };
+    }
+  };
 
-  const current = questions[currentIndex];
-  const currentPicked = answers[current?.id] ?? [];
-  const isDone = currentIndex >= 5;
+  useEffect(() => { classifyResearch(); }, []);
 
   const submitAnswer = async (picked: string[]) => {
     if (!current) return;
-
     setAnswers((prev) => ({ ...prev, [current.id]: picked }));
-    setIsThinking(true);
-
-    // 模拟思考过程
+    const previousAnswers = questions.slice(0, currentIndex + 1).map((q) => ({ question: q.title, answer: answers[q.id] || [] }));
+    previousAnswers[previousAnswers.length - 1].answer = picked;
     const thinkingDuration = simulateThinkingProcess(currentIndex);
-
+    setIsThinking(true);
     try {
+      await new Promise(resolve => setTimeout(resolve, 800));
       if (currentIndex < 4) {
-        const previousAnswers = Object.entries({ ...answers, [current.id]: picked }).map(([qId, ans]) => ({
-          question: questions.find(q => q.id === qId)?.title ?? '',
-          answer: ans,
-        }));
-
-        // 等待思考过程完成
         await new Promise(resolve => setTimeout(resolve, thinkingDuration + 500));
-
         const nextQuestion = await generateNextQuestion(classification, previousAnswers);
         setQuestions((prev) => [...prev, nextQuestion]);
       } else {
-        // 最后一题，等待思考完成
         await new Promise(resolve => setTimeout(resolve, thinkingDuration + 500));
       }
-
       setIsThinking(false);
       setThinkingSteps([]);
       setCurrentIndex((prev) => prev + 1);
@@ -274,28 +280,282 @@ function StepVerifyAndPlan({ userInput, onNext }: { userInput: string; onNext: (
       console.error('生成下一题失败:', error);
       setIsThinking(false);
       setThinkingSteps([]);
-      setTimeout(() => {
-        setCurrentIndex((prev) => prev + 1);
-      }, 300);
+      setTimeout(() => setCurrentIndex((prev) => prev + 1), 300);
     }
   };
 
   const toggleMulti = (option: string) => {
     if (!current) return;
     const set = new Set(currentPicked);
-    if (set.has(option)) set.delete(option);
-    else set.add(option);
+    if (set.has(option)) set.delete(option); else set.add(option);
     setAnswers((prev) => ({ ...prev, [current.id]: Array.from(set) }));
   };
 
-  const handleGenerateArtifact = (type: 'plan' | 'interview') => {
+  const callGeneratePlan = async () => {
+    // 生成调研方案/访谈大纲：离线模拟（不请求 /api/generate-plan）
+    const answersArray = questions.map((q) => ({ question: q.title, answer: answers[q.id] || [] }));
+    const feedbackPieces = answersArray
+      .map((a, idx) => {
+        const joined = (a.answer || []).length ? (a.answer || []).join('、') : '未选择';
+        return `核验${idx + 1}（${a.question}）：${joined}`;
+      })
+      .join('\n');
+
+    const kind = classification?.kind ?? '探索型研究';
+    const framework = classification?.framework ?? 'JTBD + 用户旅程地图';
+    const userTopic = userInput.trim();
+
+    const researchPlan = {
+      background: `在${userTopic}相关的决策过程中，不同用户会基于“动机—信息—评估—行动”的路径形成差异化选择。本研究聚焦${kind}框架，并结合${framework}梳理关键驱动因素与决策阻碍。\n\n${feedbackPieces}`,
+      theme: `${kind}视角下的${userTopic}用户洞察与验证框架`,
+      coreQuestion: `围绕${userTopic}，用户的关键动机是什么？哪些信息来源与评估标准会促进或阻碍最终选择？`,
+      methodology: `采用“定性理解 + 结构化核验”的混合方式：\n- 深度访谈/追问：围绕核验题目逐步澄清\n- 结构化归纳：将答案映射到动机维度与旅程节点\n- 产出验证：将发现组织成可执行的策略与交付物\n\n核验结果摘要：\n${feedbackPieces}`,
+      targetAudience: `目标人群与场景由核验答案指向：\n- 人群：${answersArray[0]?.answer?.[0] ?? '（待补充）'}\n- 场景：${answersArray[1]?.answer?.[0] ?? '（待补充）'}\n- 研究范围：${answersArray[2]?.answer?.[0] ?? '（待补充）'}\n\n${kind}适配说明：以${framework}建立统一分析坐标系`,
+      executionPlan: `执行步骤（离线模拟版，仅用于演示 UI）：
+第1步：基于用户输入与核验回答，抽取核心维度
+第2步：将关键驱动因素映射到“旅程节点”
+第3步：形成可直接用于方案讨论的研究结构
+第4步：整理交付物（研究背景/问题/方法/执行计划）`,
+      expectedOutput: `预期产出（离线模拟版）：
+1) 用户动机与决策路径总结
+2) 关键影响因素清单（促进/阻碍）
+3) 可落地的策略建议与执行要点
+4) 用于后续对话的结构化框架`,
+    };
+
+    const interviewGuide = [
+      {
+        title: 'Part A: 破冰环节（5-10 分钟）',
+        questions: [
+          `当你面对与${userTopic}相关的决策时，你能先讲讲你的背景/角色吗？`,
+          `你通常从哪些信息渠道了解并评估方案？（对照核验${1}的答案）`,
+          `在你看来，什么会让你更愿意推进下一步？`,
+        ],
+      },
+      {
+        title: 'Part B: 核心探索（30-40 分钟）',
+        questions: [
+          `你在做选择时最看重的标准是什么？（对照核验${2}）`,
+          `有没有让你犹豫或被“劝退”的关键因素？`,
+          `如果要向别人推荐你的最佳选择，你会怎么说明？`,
+        ],
+      },
+      {
+        title: 'Part C: 深挖与收尾（10-15 分钟）',
+        questions: [
+          `关于${userTopic}，你希望研究进一步补充哪些细节？`,
+          `如果让你用一句话概括理想体验，会是什么？`,
+          `你认为本研究最需要验证的“关键假设”是什么？`,
+        ],
+      },
+    ];
+
+    const fullContent = `# 调研方案（离线模拟）
+主题：${researchPlan.theme}
+
+## 一、研究背景
+${researchPlan.background}
+
+## 二、研究主题
+${researchPlan.theme}
+
+## 三、核心研究问题
+${researchPlan.coreQuestion}
+
+## 四、研究方法
+${researchPlan.methodology}
+
+## 五、目标受众
+${researchPlan.targetAudience}
+
+## 六、执行方案
+${researchPlan.executionPlan}
+
+## 七、预期产出
+${researchPlan.expectedOutput}
+
+# 访谈大纲（离线模拟）
+${interviewGuide.map((s) => `## ${s.title}\n- ${s.questions.join('\n- ')}`).join('\n\n')}
+`;
+
+    return { researchPlan, interviewGuide, fullContent };
+  };
+
+  const handleGenerateArtifact = async (type: 'plan' | 'interview') => {
     setSelectedArtifact(type);
     setIsPanelVisible(true);
-    setIsGeneratingPlan(true);
-    setTimeout(() => {
-      setIsGeneratingPlan(false);
-    }, 2000);
+    if (versions.length === 0) {
+      setIsGeneratingPlan(true);
+      try {
+        const data = await callGeneratePlan();
+        const v: ArtifactVersion = { version: 1, plan: data.researchPlan, interview: data.interviewGuide, fullContent: data.fullContent, createdAt: new Date().toLocaleString('zh-CN') };
+        setVersions([v]);
+        setSelectedVersionIndex(0);
+      } catch (e) {
+        console.error(e);
+        const err = e instanceof Error ? e : null;
+        const aborted =
+          err?.name === 'AbortError' ||
+          (e instanceof DOMException && e.name === 'AbortError') ||
+          Boolean(err && /aborted|AbortError/i.test(err.message));
+        alert(
+          aborted
+            ? '生成调研方案耗时较长，前端等待已超时。请稍后再次点击「调研方案」重试；若仍失败，请检查网络或调大模型超时。'
+            : '生成方案失败，请重试',
+        );
+      } finally {
+        setIsGeneratingPlan(false);
+      }
+    }
   };
+
+  const handleRefineSubmit = async () => {
+    if (!refineInput.trim()) return;
+    setRefineMode('questioning');
+
+    // 追问问题：离线模拟固定 3 题（不请求 /api/generate-refine-questions）
+    const feedback = refineInput.trim();
+    const lower = feedback.toLowerCase();
+
+    const hasCompetitor = /竞品|竞争|对手|替代/.test(feedback) || lower.includes('competitor');
+    const hasSample = /样本|样本量|扩大|范围|扩展/.test(feedback) || lower.includes('sample');
+    const hasMethod = /问卷|焦点|桌面|定量|量化/.test(feedback) || lower.includes('survey');
+
+    const q1 = {
+      id: 'rq-0',
+      mode: 'single' as const,
+      title: hasCompetitor ? '是否加入竞品/替代方案分析？' : '是否调整研究重点/核心假设？',
+      options: hasCompetitor
+        ? ['加入竞品分析', '补充竞品对比维度（价格/体验/渠道）', '不需要竞品分析']
+        : ['是，调整重点', '否，保持不变', '部分调整'],
+    };
+
+    const q2 = {
+      id: 'rq-1',
+      mode: 'single' as const,
+      title: hasSample ? '是否扩大样本量或调整研究范围？' : '是否补充研究方法（如问卷/焦点小组/桌面研究）？',
+      options: hasSample
+        ? ['扩大/加深访谈与核验', '仅补充小范围访谈', '不调整']
+        : hasMethod
+          ? ['加入问卷验证', '加入焦点小组/群访', '保持访谈为主']
+          : ['加入问卷验证', '加入桌面研究（竞品/行业资料）', '保持访谈为主'],
+    };
+
+    const q3 = {
+      id: 'rq-2',
+      mode: 'single' as const,
+      title: '反馈将如何体现在交付物上？',
+      options: ['强化洞察总结', '新增策略/建议', '加强执行计划'],
+    };
+
+    setRefineQuestions([q1, q2, q3]);
+    setRefineAnswers({});
+    setRefineCurrentIndex(0);
+  };
+
+  const submitRefineAnswer = (picked: string[]) => {
+    if (!refineCurrent) return;
+    setRefineAnswers((prev) => ({ ...prev, [refineCurrent.id]: picked }));
+    if (refineCurrentIndex < refineQuestions.length - 1) {
+      setRefineCurrentIndex((prev) => prev + 1);
+    } else {
+      doRefinePlan(picked);
+    }
+  };
+
+  const toggleRefineMulti = (option: string) => {
+    if (!refineCurrent) return;
+    const set = new Set(refineCurrentPicked);
+    if (set.has(option)) set.delete(option); else set.add(option);
+    setRefineAnswers((prev) => ({ ...prev, [refineCurrent.id]: Array.from(set) }));
+  };
+
+  const doRefinePlan = async (lastPicked?: string[]) => {
+    setRefineMode('generating');
+    try {
+      const currentVersion = versions[selectedVersionIndex];
+      const feedback = refineInput.trim();
+      const refineQa = refineQuestions.map((q) => {
+        const override = q.id === refineCurrent?.id && lastPicked ? lastPicked : undefined;
+        return { question: q.title, answer: override ?? (refineAnswers[q.id] || []) };
+      });
+
+      const answerLines = refineQa
+        .map((qa) => `${qa.question}：${(qa.answer || []).length ? qa.answer.join('、') : '未选择'}`)
+        .join('\n');
+
+      const appendUpdate = (oldText: unknown) => {
+        const base = typeof oldText === 'string' ? oldText : String(oldText ?? '');
+        return `${base}\n\n已根据反馈补充：${feedback}\n追问答案摘要：\n${answerLines}`;
+      };
+
+      const prevPlan = currentVersion.plan ?? {};
+      const researchPlan = {
+        background: appendUpdate(prevPlan.background),
+        theme: appendUpdate(prevPlan.theme),
+        coreQuestion: appendUpdate(prevPlan.coreQuestion),
+        methodology: appendUpdate(prevPlan.methodology),
+        targetAudience: appendUpdate(prevPlan.targetAudience),
+        executionPlan: appendUpdate(prevPlan.executionPlan),
+        expectedOutput: appendUpdate(prevPlan.expectedOutput),
+      };
+
+      const prevInterview = currentVersion.interview;
+      const interviewGuide = Array.isArray(prevInterview)
+        ? prevInterview.map((section: any) => {
+            const qs = Array.isArray(section?.questions) ? [...section.questions] : [];
+            qs.push(`根据反馈补充：${feedback}（重点参考：${refineQa[0]?.answer?.[0] ?? '待定'}）`);
+            return { ...section, questions: qs };
+          })
+        : [
+            {
+              title: 'Part A: 破冰环节（5-10 分钟）',
+              questions: [`根据反馈补充：${feedback}`],
+            },
+          ];
+
+      const fullContent = `# 调研方案（已根据反馈离线更新）
+主题：${researchPlan.theme}
+
+## 一、研究背景
+${researchPlan.background}
+
+## 七、预期产出
+${researchPlan.expectedOutput}
+
+# 访谈大纲
+${interviewGuide.map((s: any) => `## ${s.title}\n- ${(s.questions || []).join('\n- ')}`).join('\n\n')}
+`;
+
+      const v: ArtifactVersion = {
+        version: versions.length + 1,
+        plan: researchPlan,
+        interview: interviewGuide,
+        fullContent,
+        createdAt: new Date().toLocaleString('zh-CN'),
+      };
+      setVersions((prev) => [...prev, v]);
+      setSelectedVersionIndex(versions.length);
+      setRefineInput('');
+      setRefineQuestions([]);
+      setRefineAnswers({});
+      setRefineCurrentIndex(0);
+      setRefineMode('idle');
+    } catch (e) {
+      console.error(e);
+      alert('修改方案失败，请重试');
+      setRefineMode('idle');
+    }
+  };
+
+  const current = questions[currentIndex];
+  const currentPicked = current ? (answers[current.id] || []) : [];
+  const isDone = currentIndex >= 5;
+
+  const refineCurrent = refineQuestions[refineCurrentIndex];
+  const refineCurrentPicked = refineCurrent ? (refineAnswers[refineCurrent.id] || []) : [];
+
+  const activeVersion = versions[selectedVersionIndex];
 
   if (isClassifying) {
     return (
@@ -303,13 +563,8 @@ function StepVerifyAndPlan({ userInput, onNext }: { userInput: string; onNext: (
         <div className="bg-surface p-8 rounded-xl border border-white/10 text-center max-w-md">
           <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <div className="text-lg font-bold text-white mb-2">AI 正在分析您的研究问题</div>
-          <div className="text-sm text-gray-400 mb-4">
-            正在识别研究类型和分析框架...
-          </div>
-          <div className="text-xs text-gray-500">
-            <div className="mb-1">⏱️ 预计需要 3-5 秒</div>
-            <div>🚀 使用 DeepSeek 高速推理</div>
-          </div>
+          <div className="text-sm text-gray-400 mb-4">正在识别研究类型和分析框架...</div>
+          <div className="text-xs text-gray-500"><div className="mb-1">⏱️ 预计需要 3-5 秒</div><div>🚀 使用 DeepSeek 高速推理</div></div>
         </div>
       </div>
     );
@@ -317,7 +572,6 @@ function StepVerifyAndPlan({ userInput, onNext }: { userInput: string; onNext: (
 
   return (
     <div className="flex-1 flex overflow-hidden">
-      {/* 左侧：对话流 */}
       <div className="flex-1 overflow-y-auto p-12 border-r border-white/10">
         <div className="max-w-3xl mx-auto space-y-6">
           {questions.slice(0, currentIndex).map((q, idx) => (
@@ -329,14 +583,7 @@ function StepVerifyAndPlan({ userInput, onNext }: { userInput: string; onNext: (
                   {q.options.map((option) => {
                     const selected = (answers[q.id] ?? []).includes(option);
                     return (
-                      <div
-                        key={option}
-                        className={`p-3 text-sm rounded border ${
-                          selected ? 'border-primary bg-primary/10 text-primary' : 'border-white/10 text-gray-300'
-                        }`}
-                      >
-                        {option}
-                      </div>
+                      <div key={option} className={`p-3 text-sm rounded border ${selected ? 'border-primary bg-primary/10 text-primary' : 'border-white/10 text-gray-300'}`}>{option}</div>
                     );
                   })}
                 </div>
@@ -353,27 +600,12 @@ function StepVerifyAndPlan({ userInput, onNext }: { userInput: string; onNext: (
                   {current.options.map((option) => {
                     const selected = currentPicked.includes(option);
                     return (
-                      <button
-                        key={option}
-                        onClick={() => (current.mode === 'single' ? submitAnswer([option]) : toggleMulti(option))}
-                        disabled={isThinking}
-                        className={`p-3 text-left rounded border transition-colors ${
-                          selected ? 'border-primary bg-primary/10 text-primary' : 'border-white/10 hover:bg-white/5'
-                        } ${isThinking ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      >
-                        {option}
-                      </button>
+                      <button key={option} onClick={() => (current.mode === 'single' ? submitAnswer([option]) : toggleMulti(option))} disabled={isThinking} className={`p-3 text-left rounded border transition-colors ${selected ? 'border-primary bg-primary/10 text-primary' : 'border-white/10 hover:bg-white/5'} ${isThinking ? 'opacity-50 cursor-not-allowed' : ''}`}>{option}</button>
                     );
                   })}
                 </div>
                 {current.mode !== 'single' && (
-                  <button
-                    onClick={() => submitAnswer(currentPicked)}
-                    disabled={isThinking || currentPicked.length === 0}
-                    className="mt-4 w-full bg-primary text-black px-4 py-2 font-bold rounded disabled:opacity-50"
-                  >
-                    确认选择
-                  </button>
+                  <button onClick={() => submitAnswer(currentPicked)} disabled={isThinking || currentPicked.length === 0} className="mt-4 w-full bg-primary text-black px-4 py-2 font-bold rounded disabled:opacity-50">确认选择</button>
                 )}
               </div>
             </div>
@@ -387,12 +619,19 @@ function StepVerifyAndPlan({ userInput, onNext }: { userInput: string; onNext: (
               </div>
               <div className="space-y-2">
                 {thinkingSteps.map((step, idx) => (
-                  <div key={idx} className="flex items-start gap-2 text-sm text-gray-400 animate-fade-in">
-                    <span className="text-primary mt-0.5">▸</span>
-                    <span>{step}</span>
-                  </div>
+                  <div key={idx} className="flex items-start gap-2 text-sm text-gray-400 animate-fade-in"><span className="text-primary mt-0.5">▸</span><span>{step}</span></div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {refineMode === 'generating' && (
+            <div className="bg-surface p-6 rounded-xl border border-white/10">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                <span className="text-sm font-bold text-white">AI 正在修改方案...</span>
+              </div>
+              <div className="text-sm text-gray-400">请稍候，正在根据您的反馈生成新版本</div>
             </div>
           )}
 
@@ -404,51 +643,70 @@ function StepVerifyAndPlan({ userInput, onNext }: { userInput: string; onNext: (
                 <div className="text-sm font-bold mb-2">动态核验已完成</div>
                 <div className="text-xs text-gray-400 mb-4">5/5 题已确认，系统已生成初步方案</div>
                 <div className="text-xs text-gray-500 mb-4">点击下方卡片查看详细内容</div>
-
-                {/* Artifact 卡片 */}
                 <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={() => handleGenerateArtifact('plan')}
-                    className={`p-4 rounded-lg border-2 transition-all text-left ${
-                      selectedArtifact === 'plan'
-                        ? 'border-primary bg-primary/10'
-                        : 'border-white/10 hover:border-white/20 bg-surface-hover'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-2">
-                      <FileText size={18} className="text-primary" />
-                      <span className="text-sm font-bold text-white">调研方案</span>
-                    </div>
+                  <button onClick={() => handleGenerateArtifact('plan')} className={`p-4 rounded-lg border-2 transition-all text-left ${selectedArtifact === 'plan' ? 'border-primary bg-primary/10' : 'border-white/10 hover:border-white/20 bg-surface-hover'}`}>
+                    <div className="flex items-center gap-2 mb-2"><FileText size={18} className="text-primary" /><span className="text-sm font-bold text-white">调研方案</span></div>
                     <p className="text-xs text-gray-400">研究背景、方法论、执行计划</p>
                   </button>
-
-                  <button
-                    onClick={() => handleGenerateArtifact('interview')}
-                    className={`p-4 rounded-lg border-2 transition-all text-left ${
-                      selectedArtifact === 'interview'
-                        ? 'border-primary bg-primary/10'
-                        : 'border-white/10 hover:border-white/20 bg-surface-hover'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-2">
-                      <User size={18} className="text-primary" />
-                      <span className="text-sm font-bold text-white">访谈大纲</span>
-                    </div>
+                  <button onClick={() => handleGenerateArtifact('interview')} className={`p-4 rounded-lg border-2 transition-all text-left ${selectedArtifact === 'interview' ? 'border-primary bg-primary/10' : 'border-white/10 hover:border-white/20 bg-surface-hover'}`}>
+                    <div className="flex items-center gap-2 mb-2"><User size={18} className="text-primary" /><span className="text-sm font-bold text-white">访谈大纲</span></div>
                     <p className="text-xs text-gray-400">结构化访谈问题设计</p>
                   </button>
                 </div>
               </div>
 
-              <button
-                onClick={() => {
-                  const answersArray = Object.entries(answers).map(([qId, ans]) => ({
-                    question: questions.find(q => q.id === qId)?.title ?? '',
-                    answer: ans
-                  }));
-                  onNext(classification, answersArray);
-                }}
-                className="w-full bg-primary text-black px-8 py-3 font-bold flex items-center justify-center gap-2 hover:bg-primary/90 rounded-lg"
-              >
+              {versions.length > 0 && refineMode !== 'questioning' && (
+                <div className="bg-surface p-4 rounded-xl border border-white/10">
+                  <div className="text-xs text-gray-400 mb-2">对方案不满意？输入修改需求继续对话</div>
+                  <div className="flex gap-2">
+                    <input value={refineInput} onChange={(e) => setRefineInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleRefineSubmit()} placeholder="例如：希望增加竞争对手分析、样本量扩大到50人..." className="flex-1 bg-black/30 border border-white/10 rounded px-3 py-2 text-sm text-white placeholder:text-gray-600 outline-none focus:border-primary" />
+                    <button onClick={handleRefineSubmit} className="bg-primary text-black px-4 py-2 rounded font-bold text-sm hover:bg-primary/90">发送</button>
+                  </div>
+                </div>
+              )}
+
+              {refineMode === 'questioning' && (
+                <div className="space-y-6">
+                  <div className="text-sm text-gray-300">为了更好地理解您的需求，请回答以下问题：</div>
+                  {refineQuestions.slice(0, refineCurrentIndex).map((q, idx) => (
+                    <div key={q.id} className="space-y-3">
+                      <div className="text-xs text-primary font-bold">追问 {idx + 1}</div>
+                      <div className="bg-surface p-5 rounded-xl border border-white/10">
+                        <div className="text-sm font-bold mb-3">{q.title}</div>
+                        <div className="space-y-2">
+                          {q.options.map((option) => {
+                            const selected = (refineAnswers[q.id] ?? []).includes(option);
+                            return (
+                              <div key={option} className={`p-3 text-sm rounded border ${selected ? 'border-primary bg-primary/10 text-primary' : 'border-white/10 text-gray-300'}`}>{option}</div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {refineCurrent && (
+                    <div className="space-y-3">
+                      <div className="text-xs text-primary font-bold">追问 {refineCurrentIndex + 1}</div>
+                      <div className="bg-surface p-6 rounded-xl border border-primary/40">
+                        <div className="text-sm font-bold mb-4">{refineCurrent.title}</div>
+                        <div className="grid grid-cols-2 gap-3">
+                          {refineCurrent.options.map((option) => {
+                            const selected = refineCurrentPicked.includes(option);
+                            return (
+                              <button key={option} onClick={() => (refineCurrent.mode === 'single' ? submitRefineAnswer([option]) : toggleRefineMulti(option))} className={`p-3 text-left rounded border transition-colors ${selected ? 'border-primary bg-primary/10 text-primary' : 'border-white/10 hover:bg-white/5'}`}>{option}</button>
+                            );
+                          })}
+                        </div>
+                        {refineCurrent.mode !== 'single' && (
+                          <button onClick={() => submitRefineAnswer(refineCurrentPicked)} disabled={refineCurrentPicked.length === 0} className="mt-4 w-full bg-primary text-black px-4 py-2 font-bold rounded disabled:opacity-50">确认选择</button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <button onClick={() => { const answersArray = Object.entries(answers).map(([qId, ans]) => ({ question: questions.find(q => q.id === qId)?.title ?? '', answer: ans })); onNext(classification, answersArray, activeVersion); }} className="w-full bg-primary text-black px-8 py-3 font-bold flex items-center justify-center gap-2 hover:bg-primary/90 rounded-lg">
                 确认方案，进入下一步 <ArrowRight size={18} />
               </button>
             </>
@@ -456,18 +714,9 @@ function StepVerifyAndPlan({ userInput, onNext }: { userInput: string; onNext: (
         </div>
       </div>
 
-      {/* 右侧：方案展示 - 仅在完成后显示 */}
       {isDone && isPanelVisible && (
         <div className="w-1/2 overflow-y-auto bg-white text-black relative">
-          {/* 隐藏按钮 */}
-          <button
-            onClick={() => setIsPanelVisible(false)}
-            className="absolute top-4 right-4 z-10 w-8 h-8 bg-black text-white rounded-full flex items-center justify-center hover:bg-gray-800 transition-colors"
-            title="隐藏面板"
-          >
-            ✕
-          </button>
-
+          <button onClick={() => setIsPanelVisible(false)} className="absolute top-4 right-4 z-10 w-8 h-8 bg-black text-white rounded-full flex items-center justify-center hover:bg-gray-800 transition-colors" title="隐藏面板">✕</button>
           {isGeneratingPlan && (
             <div className="h-full flex items-center justify-center p-12">
               <div className="text-center">
@@ -476,250 +725,73 @@ function StepVerifyAndPlan({ userInput, onNext }: { userInput: string; onNext: (
               </div>
             </div>
           )}
-
-          {!isGeneratingPlan && selectedArtifact === 'plan' && (
+          {!isGeneratingPlan && versions.length > 0 && (
             <div className="p-16 max-w-4xl mx-auto">
-              {/* PDF 样式的文档 */}
-              <div className="mb-12">
-                <h1 className="text-4xl font-bold mb-4">调研方案</h1>
-                <div className="text-sm text-gray-600 mb-2">生成时间：{new Date().toLocaleDateString('zh-CN')}</div>
-                <div className="h-1 bg-black w-20"></div>
+              <div className="flex items-center gap-2 mb-8 border-b border-gray-200 pb-4">
+                <span className="text-sm text-gray-600 font-bold">版本：</span>
+                <div className="flex gap-2">
+                  {versions.map((v, idx) => (
+                    <button key={v.version} onClick={() => setSelectedVersionIndex(idx)} className={`px-3 py-1 rounded text-sm border transition-colors ${selectedVersionIndex === idx ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400'}`}>v{v.version}.0</button>
+                  ))}
+                </div>
+                {activeVersion && <span className="ml-auto text-xs text-gray-400">生成时间：{activeVersion.createdAt}</span>}
               </div>
 
-              <div className="space-y-10 text-base leading-relaxed">
-                <section>
-                  <h2 className="text-2xl font-bold mb-4">一、研究背景</h2>
-                  <p className="text-gray-800 leading-loose">
-                    在当前新能源汽车市场快速发展的背景下，年轻消费群体（18-35岁）正成为新能源车的主要潜在购买者。这一群体成长于互联网时代，对科技产品接受度高，同时也更关注环保和可持续发展。
-                  </p>
-                  <p className="text-gray-800 leading-loose mt-4">
-                    然而，尽管新能源车市场增长迅速，年轻人对新能源车的认知、态度和购买意愿仍存在较大差异。部分年轻人对续航里程、充电便利性、智能化体验等方面存在顾虑，这些因素直接影响其购买决策。
-                  </p>
-                  <p className="text-gray-800 leading-loose mt-4">
-                    因此，深入了解年轻人对新能源车的真实看法、核心关注点和决策动机，对于产品优化、营销策略制定和用户体验提升具有重要意义。
-                  </p>
-                </section>
+              {selectedArtifact === 'plan' && activeVersion?.plan && (
+                <div className="space-y-10 text-base leading-relaxed">
+                  <div className="mb-12"><h1 className="text-4xl font-bold mb-4">调研方案</h1><div className="text-sm text-gray-600 mb-2">生成时间：{activeVersion.createdAt}</div><div className="h-1 bg-black w-20"></div></div>
+                  {activeVersion.plan.background && activeVersion.plan.background !== '待补充' && (
+                    <section><h2 className="text-2xl font-bold mb-4">一、研究背景</h2><div className="text-gray-800 leading-loose whitespace-pre-wrap">{activeVersion.plan.background}</div></section>
+                  )}
+                  {activeVersion.plan.theme && activeVersion.plan.theme !== '待补充' && (
+                    <section><h2 className="text-2xl font-bold mb-4">二、研究主题</h2><div className="text-gray-800 leading-loose">{activeVersion.plan.theme}</div></section>
+                  )}
+                  {activeVersion.plan.coreQuestion && activeVersion.plan.coreQuestion !== '待补充' && (
+                    <section><h2 className="text-2xl font-bold mb-4">三、核心研究问题</h2><div className="text-gray-800 leading-loose">{activeVersion.plan.coreQuestion}</div></section>
+                  )}
+                  {activeVersion.plan.methodology && activeVersion.plan.methodology !== '待补充' && (
+                    <section><h2 className="text-2xl font-bold mb-4">四、研究方法</h2><div className="text-gray-800 leading-loose whitespace-pre-wrap">{activeVersion.plan.methodology}</div></section>
+                  )}
+                  {activeVersion.plan.targetAudience && activeVersion.plan.targetAudience !== '待补充' && (
+                    <section><h2 className="text-2xl font-bold mb-4">五、目标受众</h2><div className="text-gray-800 leading-loose whitespace-pre-wrap">{activeVersion.plan.targetAudience}</div></section>
+                  )}
+                  {activeVersion.plan.executionPlan && activeVersion.plan.executionPlan !== '待补充' && (
+                    <section><h2 className="text-2xl font-bold mb-4">六、执行方案</h2><div className="text-gray-800 leading-loose whitespace-pre-wrap">{activeVersion.plan.executionPlan}</div></section>
+                  )}
+                  {activeVersion.plan.expectedOutput && activeVersion.plan.expectedOutput !== '待补充' && (
+                    <section><h2 className="text-2xl font-bold mb-4">七、预期产出</h2><div className="text-gray-800 leading-loose whitespace-pre-wrap">{activeVersion.plan.expectedOutput}</div></section>
+                  )}
+                </div>
+              )}
 
-                <section>
-                  <h2 className="text-2xl font-bold mb-4">二、研究主题</h2>
-                  <p className="text-gray-800 leading-loose">
-                    年轻人（18-35岁）对新能源汽车的认知、态度与购买决策研究
-                  </p>
-                </section>
-
-                <section>
-                  <h2 className="text-2xl font-bold mb-4">三、核心研究问题</h2>
-                  <p className="text-gray-800 leading-loose">
-                    年轻人在考虑购买新能源车时，核心关注点是什么？哪些因素促进或阻碍了他们的购买决策？
-                  </p>
-                </section>
-
-                <section>
-                  <h2 className="text-2xl font-bold mb-4">四、研究方法</h2>
-                  <p className="text-gray-800 leading-loose mb-4">
-                    本研究采用定性研究为主、定量验证为辅的混合方法：
-                  </p>
-                  <div className="ml-6 space-y-4">
-                    <div>
-                      <h3 className="font-bold mb-2">4.1 定性研究</h3>
-                      <ul className="list-disc ml-6 space-y-1 text-gray-800">
-                        <li>深度访谈（1对1）：15-20 人，每人 60 分钟</li>
-                        <li>焦点小组讨论：2 组，每组 6-8 人，每组 90 分钟</li>
-                      </ul>
-                    </div>
-                    <div>
-                      <h3 className="font-bold mb-2">4.2 定量研究</h3>
-                      <ul className="list-disc ml-6 space-y-1 text-gray-800">
-                        <li>在线问卷调查：200-300 份，用于验证定性研究中的关键发现</li>
-                      </ul>
-                    </div>
-                    <div>
-                      <h3 className="font-bold mb-2">4.3 分析方法</h3>
-                      <ul className="list-disc ml-6 space-y-1 text-gray-800">
-                        <li>主题分析（Thematic Analysis）：识别核心主题和模式</li>
-                        <li>JTBD 框架分析：理解用户试图完成的任务和期望结果</li>
-                        <li>用户旅程地图：绘制从认知到购买的完整决策路径</li>
-                      </ul>
-                    </div>
-                  </div>
-                </section>
-
-                <section>
-                  <h2 className="text-2xl font-bold mb-4">五、目标受众</h2>
-                  <div className="ml-6 space-y-4">
-                    <div>
-                      <h3 className="font-bold mb-2">5.1 目标人群定义</h3>
-                      <ul className="list-disc ml-6 space-y-1 text-gray-800">
-                        <li>年龄：18-35 岁</li>
-                        <li>职业：在校大学生、职场新人、成熟职场人</li>
-                        <li>地域：一线及新一线城市（北上广深、杭州、成都等）</li>
-                        <li>用车需求：有购车计划或正在考虑购车</li>
-                      </ul>
-                    </div>
-                    <div>
-                      <h3 className="font-bold mb-2">5.2 样本量</h3>
-                      <ul className="list-disc ml-6 space-y-1 text-gray-800">
-                        <li>深度访谈：15-20 人</li>
-                        <li>焦点小组：12-16 人（2 组）</li>
-                        <li>在线问卷：200-300 份</li>
-                      </ul>
-                    </div>
-                    <div>
-                      <h3 className="font-bold mb-2">5.3 人群细分</h3>
-                      <ul className="list-disc ml-6 space-y-1 text-gray-800">
-                        <li>理性派（30%）：重视参数、性价比、实用性</li>
-                        <li>体验派（40%）：重视驾驶感受、智能化、设计美学</li>
-                        <li>环保派（30%）：重视可持续性、品牌价值观、社会责任</li>
-                      </ul>
-                    </div>
-                  </div>
-                </section>
-
-                <section>
-                  <h2 className="text-2xl font-bold mb-4">六、执行计划</h2>
-                  <div className="ml-6 space-y-4">
-                    <div>
-                      <h3 className="font-bold mb-2">6.1 时间规划（共 6 周）</h3>
-                      <ul className="list-disc ml-6 space-y-1 text-gray-800">
-                        <li>Week 1-2：招募筛选、预约安排</li>
-                        <li>Week 3-4：深度访谈执行（15-20 场）</li>
-                        <li>Week 5：焦点小组执行（2 场）+ 问卷发放</li>
-                        <li>Week 6：数据分析、报告撰写</li>
-                      </ul>
-                    </div>
-                    <div>
-                      <h3 className="font-bold mb-2">6.2 资源需求</h3>
-                      <ul className="list-disc ml-6 space-y-1 text-gray-800">
-                        <li>研究团队：主研究员 1 人 + 助理研究员 1 人</li>
-                        <li>招募渠道：社交媒体（小红书、微博）、汽车社群、高校合作</li>
-                        <li>场地：访谈室（安静、私密）、焦点小组室（可容纳 8-10 人）</li>
-                        <li>设备：录音设备、转录工具、在线问卷平台</li>
-                        <li>激励：深度访谈 200-300 元/人，焦点小组 150-200 元/人</li>
-                      </ul>
-                    </div>
-                  </div>
-                </section>
-
-                <section>
-                  <h2 className="text-2xl font-bold mb-4">七、预期输出</h2>
-                  <ul className="list-decimal ml-6 space-y-2 text-gray-800">
-                    <li>用户画像报告：3 类典型用户画像，包含人口特征、心理特征、行为模式、需求痛点</li>
-                    <li>核心洞察报告：年轻人对新能源车的认知现状、购买决策关键因素、续航焦虑分析</li>
-                    <li>用户旅程地图：从认知到购买的完整决策路径可视化</li>
-                    <li>策略建议报告：产品优化建议、营销策略建议、用户体验提升方向</li>
-                  </ul>
-                </section>
-              </div>
-            </div>
-          )}
-
-          {!isGeneratingPlan && selectedArtifact === 'interview' && (
-            <div className="p-16 max-w-4xl mx-auto">
-              {/* PDF 样式的文档 */}
-              <div className="mb-12">
-                <h1 className="text-4xl font-bold mb-4">访谈大纲</h1>
-                <div className="text-sm text-gray-600 mb-2">生成时间：{new Date().toLocaleDateString('zh-CN')}</div>
-                <div className="h-1 bg-black w-20"></div>
-              </div>
-
-              <div className="space-y-10 text-base leading-relaxed">
-                <section>
-                  <h2 className="text-2xl font-bold mb-4">Part A: 破冰环节（5-10 分钟）</h2>
-                  <p className="text-gray-600 mb-4 italic">目标：建立信任，了解背景</p>
-                  <ol className="list-decimal ml-6 space-y-3 text-gray-800">
-                    <li>能否简单介绍一下您的日常出行方式？</li>
-                    <li>您平时关注汽车相关的信息吗？通过什么渠道？</li>
-                    <li>您对新能源车有什么第一印象？</li>
-                  </ol>
-                </section>
-
-                <section>
-                  <h2 className="text-2xl font-bold mb-4">Part B: 核心探索（30-40 分钟）</h2>
-                  <p className="text-gray-600 mb-4 italic">目标：深入了解核心研究问题</p>
-
-                  <div className="space-y-6">
-                    <div>
-                      <h3 className="text-lg font-bold mb-3">主题 1：认知与态度</h3>
+              {selectedArtifact === 'interview' && activeVersion?.interview && (
+                <div className="space-y-10 text-base leading-relaxed">
+                  <div className="mb-12"><h1 className="text-4xl font-bold mb-4">访谈大纲</h1><div className="text-sm text-gray-600 mb-2">生成时间：{activeVersion.createdAt}</div><div className="h-1 bg-black w-20"></div></div>
+                  {activeVersion.interview.map((section: any, sidx: number) => (
+                    <section key={sidx}>
+                      <h2 className="text-2xl font-bold mb-4">{section.title}</h2>
                       <ol className="list-decimal ml-6 space-y-3 text-gray-800">
-                        <li>您觉得新能源车和传统燃油车最大的区别是什么？
-                          <div className="text-sm text-gray-600 mt-1 ml-4">追问：这些区别对您来说意味着什么？</div>
-                        </li>
-                        <li>如果考虑购买新能源车，您最关心哪些方面？
-                          <div className="text-sm text-gray-600 mt-1 ml-4">追问：为什么这些方面对您很重要？</div>
-                        </li>
-                        <li>您身边有朋友或家人使用新能源车吗？他们的反馈如何？</li>
+                        {section.questions.map((q: string, qidx: number) => (
+                          <li key={qidx}>{q}</li>
+                        ))}
                       </ol>
-                    </div>
-
-                    <div>
-                      <h3 className="text-lg font-bold mb-3">主题 2：决策因素</h3>
-                      <ol className="list-decimal ml-6 space-y-3 text-gray-800" start={4}>
-                        <li>有哪些因素会促使您选择新能源车？
-                          <div className="text-sm text-gray-600 mt-1 ml-4">追问：能否按重要性排序？</div>
-                        </li>
-                        <li>有哪些顾虑或担心会阻止您购买？
-                          <div className="text-sm text-gray-600 mt-1 ml-4">追问：这些顾虑有多严重？</div>
-                        </li>
-                        <li>您会如何评估一辆新能源车是否值得购买？</li>
-                      </ol>
-                    </div>
-
-                    <div>
-                      <h3 className="text-lg font-bold mb-3">主题 3：使用场景</h3>
-                      <ol className="list-decimal ml-6 space-y-3 text-gray-800" start={7}>
-                        <li>您主要的用车场景是什么？（通勤/出游/商务）
-                          <div className="text-sm text-gray-600 mt-1 ml-4">追问：能否描述一个典型的用车日？</div>
-                        </li>
-                        <li>在这些场景下，您对车辆有什么特殊要求？</li>
-                        <li>您对充电的便利性有什么期待？</li>
-                      </ol>
-                    </div>
-                  </div>
-                </section>
-
-                <section>
-                  <h2 className="text-2xl font-bold mb-4">Part C: 深挖与收尾（10-15 分钟）</h2>
-                  <p className="text-gray-600 mb-4 italic">目标：挖掘深层动机，补充遗漏信息</p>
-                  <ol className="list-decimal ml-6 space-y-3 text-gray-800">
-                    <li>如果让您向朋友推荐新能源车，您会怎么说？
-                      <div className="text-sm text-gray-600 mt-1 ml-4">追问：您会强调哪些优点？提醒哪些注意事项？</div>
-                    </li>
-                    <li>您觉得什么样的新能源车最符合您的需求？
-                      <div className="text-sm text-gray-600 mt-1 ml-4">追问：能否描述您理想中的新能源车？</div>
-                    </li>
-                    <li>关于新能源车，还有什么我们没有聊到但您觉得重要的吗？</li>
-                  </ol>
-                </section>
-
-                <section className="border-t pt-6 mt-8">
-                  <h3 className="text-lg font-bold mb-3">访谈注意事项</h3>
-                  <ul className="list-disc ml-6 space-y-2 text-gray-700 text-sm">
-                    <li>保持开放式提问，避免引导性问题</li>
-                    <li>鼓励受访者分享具体案例和故事</li>
-                    <li>适时使用追问技巧："能否举个例子？"、"为什么这么说？"</li>
-                    <li>注意观察非语言信号（犹豫、兴奋、困惑等）</li>
-                    <li>灵活调整问题顺序，跟随受访者的思路</li>
-                  </ul>
-                </section>
-              </div>
+                    </section>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
       )}
 
-      {/* 展开按钮 - 仅在完成且面板隐藏时显示 */}
       {isDone && !isPanelVisible && selectedArtifact && (
-        <button
-          onClick={() => setIsPanelVisible(true)}
-          className="fixed right-4 top-1/2 -translate-y-1/2 bg-primary text-black px-4 py-3 rounded-l-lg font-bold shadow-lg hover:bg-primary/90 transition-all z-10"
-        >
+        <button onClick={() => setIsPanelVisible(true)} className="fixed right-4 top-1/2 -translate-y-1/2 bg-primary text-black px-4 py-3 rounded-l-lg font-bold shadow-lg hover:bg-primary/90 transition-all z-10">
           <span className="writing-mode-vertical">查看{selectedArtifact === 'plan' ? '调研方案' : '访谈大纲'}</span>
         </button>
       )}
     </div>
   );
 }
-
 function StepVerify({ userInput, onNext }: { userInput: string; onNext: (classification: any, answers: Array<{ question: string; answer: string[] }>) => void }) {
   type Question = { id: string; mode: 'single' | 'multi' | 'multiple'; title: string; options: string[] };
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -774,15 +846,19 @@ function StepVerify({ userInput, onNext }: { userInput: string; onNext: (classif
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userInput }),
         });
+        if (!response.ok) {
+          throw new Error(`classify-research HTTP ${response.status}`);
+        }
         const result = await response.json();
         setClassification(result);
-
-        // 根据分类结果生成第一个问题
         const firstQuestion = await generateNextQuestion(result, []);
         setQuestions([firstQuestion]);
-        setIsClassifying(false);
       } catch (error) {
         console.error('分类失败:', error);
+        setClassification({ ...OFFLINE_RESEARCH_CLASSIFICATION });
+        const firstQuestion = await generateNextQuestion(OFFLINE_RESEARCH_CLASSIFICATION, []);
+        setQuestions([firstQuestion]);
+      } finally {
         setIsClassifying(false);
       }
     };
@@ -1324,7 +1400,6 @@ function StepAudience({ onNext }: { onNext: () => void }) {
     { id: 'c5', name: '品牌认同型', tags: ['品牌价值', '长期主义', '口碑驱动'], users: 102, voc: 468 },
   ]);
   const [selectedProfileId, setSelectedProfileId] = useState('c1');
-  const [tagInput, setTagInput] = useState('');
   const [personas, setPersonas] = useState([
     { id: 'p1', profileId: 'c1', name: '陈思远', tags: ['科技极客', '高净值'], score: 8.8, conf: 93, cdpTags: ['智驾优先', '高净值', '效率导向'], voc: '我希望车辆主动发现风险并接管平顺。', radar: [82, 90, 84, 76, 92, 95, 70] },
     { id: 'p2', profileId: 'c1', name: '林沐然', tags: ['精致生活家', '安全控'], score: 9.1, conf: 95, cdpTags: ['家庭用户', '安全敏感', '材质关注'], voc: '环保材料不是口号，体验和质感必须同时在线。', radar: [80, 86, 88, 74, 94, 83, 79] },
@@ -1351,9 +1426,32 @@ function StepAudience({ onNext }: { onNext: () => void }) {
     '品牌认知与情感连接': ['品牌认知', '情感倾向', '价值观匹配', '推荐意愿', '社群参与']
   };
 
-  const selectedProfile = profiles.find((p) => p.id === selectedProfileId) ?? profiles[0];
   const selectedPersona = personas.find((p) => p.id === selectedPersonaId) ?? null;
   const filteredPersonas = personas.filter((p) => p.profileId === selectedProfileId || p.profileId === 'all');
+
+  // 如果历史生成的人设 name 里包含“xxxx型”（如“理性先锋型A/B”），则按 profileId 映射回默认姓名，避免在卡片标题中展示“xxxx型”。
+  const defaultPersonaNamesByProfileId: Record<string, string[]> = {
+    c1: ['陈思远', '林沐然'],
+    c2: ['周祺'],
+    c3: ['许悠然'],
+    c4: ['张逸豪'],
+    c5: ['宋致远'],
+  };
+
+  const getPersonaDisplayName = (p: any) => {
+    const rawName = p?.name ?? '';
+    const profileId = p?.profileId;
+    if (!rawName) return rawName;
+    if (!rawName.includes('型')) return rawName;
+
+    const letter = rawName.endsWith('A') ? 'A' : rawName.endsWith('B') ? 'B' : null;
+    const candidates = defaultPersonaNamesByProfileId[profileId] ?? [];
+    if (!candidates.length) return rawName;
+
+    if (letter === 'A') return candidates[0] ?? rawName;
+    if (letter === 'B') return candidates[1] ?? candidates[0] ?? rawName;
+    return candidates[0] ?? rawName;
+  };
 
   // 计算筛选后的users和voc数量
   const calculateFilteredCounts = () => {
@@ -1404,41 +1502,6 @@ function StepAudience({ onNext }: { onNext: () => void }) {
       ));
     }
     handleCloseEditModal();
-  };
-
-  const addTagToAllProfiles = () => {
-    const tag = tagInput.trim();
-    if (!tag) return;
-    setProfiles((prev) => prev.map((p) => (!p.tags.includes(tag) ? { ...p, tags: [...p.tags, tag] } : p)));
-    setTagInput('');
-  };
-
-  const generatePersonas = () => {
-    const created = profiles.slice(0, 5).flatMap((profile, idx) => [
-      {
-        id: `gen-${profile.id}-a`,
-        profileId: profile.id,
-        name: `${profile.name}A`,
-        tags: [profile.tags[0] ?? '标签1', profile.tags[1] ?? '标签2'],
-        score: 8.4 + (idx % 3) * 0.4,
-        conf: 90 + (idx % 5),
-        cdpTags: profile.tags,
-        voc: `来自${profile.name}的代表性VOC：用户在决策中持续强调安全与体验平衡。`,
-        radar: [78 + idx, 84 + idx, 80 + idx, 74 + idx, 88 + idx, 90 + idx, 72 + idx],
-      },
-      {
-        id: `gen-${profile.id}-b`,
-        profileId: profile.id,
-        name: `${profile.name}B`,
-        tags: [profile.tags[1] ?? '标签1', '潜客行为'],
-        score: 8.2 + (idx % 4) * 0.3,
-        conf: 89 + (idx % 6),
-        cdpTags: profile.tags,
-        voc: `来自${profile.name}的代表性VOC：希望系统在复杂场景里提供低打扰高确定性反馈。`,
-        radar: [76 + idx, 82 + idx, 79 + idx, 77 + idx, 86 + idx, 91 + idx, 75 + idx],
-      },
-    ]);
-    setPersonas(created);
   };
 
   const radarData = selectedPersona
@@ -1504,35 +1567,13 @@ function StepAudience({ onNext }: { onNext: () => void }) {
               })}
             </div>
           </div>
-
-          <div className="bg-surface p-6 rounded-xl">
-            <h3 className="text-sm font-bold mb-4">标签管理</h3>
-            <div className="flex flex-wrap gap-2 mb-4">
-              {selectedProfile.tags.map((tag) => (
-                <span key={tag} className="px-2 py-1 rounded bg-surface-hover text-xs text-primary">{tag}</span>
-              ))}
-            </div>
-            <div className="flex gap-2">
-              <input
-                value={tagInput}
-                onChange={(e) => setTagInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && addTagToAllProfiles()}
-                placeholder="新增 CDP 标签（将应用到所有画像）..."
-                className="flex-1 bg-surface-hover border border-white/10 rounded p-2 text-sm outline-none"
-              />
-              <button onClick={addTagToAllProfiles} className="px-4 py-2 bg-primary text-black rounded text-sm font-bold">添加</button>
-            </div>
-            <button onClick={generatePersonas} className="w-full mt-3 bg-surface-hover text-white py-2 rounded text-sm font-bold hover:bg-white/10">
-              根据当前画像生成模拟人设
-            </button>
-          </div>
         </div>
 
         <div className="col-span-7 space-y-6">
           {selectedPersona ? (
             <div className="bg-surface p-6 rounded-xl">
               <div className="flex justify-between items-center mb-4">
-                <h3 className="text-xl font-bold">{selectedPersona.name} - 详情</h3>
+                <h3 className="text-xl font-bold">{getPersonaDisplayName(selectedPersona)} - 详情</h3>
                 <button onClick={() => setSelectedPersonaId(null)} className="text-xs text-gray-400 hover:text-white">返回卡片列表</button>
               </div>
               <div className="mb-4">
@@ -1564,7 +1605,7 @@ function StepAudience({ onNext }: { onNext: () => void }) {
               <div className="grid grid-cols-2 gap-4">
                 {filteredPersonas.map((p) => (
                   <button key={p.id} onClick={() => setSelectedPersonaId(p.id)} className="bg-white/5 p-4 rounded text-left hover:bg-white/10 transition-colors">
-                    <h4 className="text-lg font-bold mb-2">{p.name}</h4>
+                    <h4 className="text-lg font-bold mb-2">{getPersonaDisplayName(p)}</h4>
                     <div className="flex gap-2 mb-4">
                       <span className="px-2 py-1 bg-blue-500/20 text-blue-400 text-xs rounded">{p.tags[0]}</span>
                       <span className="px-2 py-1 bg-surface-hover text-gray-300 text-xs rounded">{p.tags[1]}</span>

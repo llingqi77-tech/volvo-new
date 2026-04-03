@@ -23,12 +23,14 @@ start-dev.bat
 ### 手动启动
 
 ```bash
-# 方式 1：同时启动前端和 API（推荐）
-npm run dev:all
+# 推荐：一条命令同时启动前端（3000）与 API（3001）
+npm run dev
 
-# 方式 2：分别启动
-npm run dev    # 前端（端口 3000）
-npm run api    # API 服务器（端口 3001）
+# 仅前端（不启动 API，正式研究等 /api 接口将不可用）
+npm run dev:client
+
+# 仅 API
+npm run api
 ```
 
 ### 访问地址
@@ -144,7 +146,7 @@ OPENROUTER_MODEL="stepfun/step-3.5-flash:free"
 
 ```bash
 # 推荐：同时启动前端和 API
-npm run dev:all
+npm run dev
 
 # 或使用启动脚本
 ./start-dev.sh  # Mac/Linux
@@ -219,9 +221,9 @@ src/
 ## 6. 常见命令
 
 ```bash
-npm run dev        # 启动前端（端口 3000）
-npm run api        # 启动 API 服务器（端口 3001）
-npm run dev:all    # 同时启动前端和 API
+npm run dev        # 前端（3000）+ API（3001）
+npm run dev:client # 仅前端
+npm run api        # 仅 API（端口 3001）
 npm run build      # 构建生产版本
 npm run preview    # 预览生产版本
 npm run lint       # TypeScript 类型检查
@@ -273,7 +275,7 @@ lsof -ti:3001 | xargs kill -9
 
 2. 检查浏览器控制台（F12）的错误信息
 
-3. 使用 `npm run dev:all` 同时启动前端和 API
+3. 使用 `npm run dev` 同时启动前端和 API
 
 ---
 

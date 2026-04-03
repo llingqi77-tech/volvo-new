@@ -18,7 +18,7 @@ export default function Sidebar({
   const navItems = [
     { id: 'knowledge', icon: Database, label: '知识库管理' },
     { id: 'persona', icon: Users, label: '人设库管理' },
-    { id: 'chat', icon: MessageSquare, label: '聊天模式' },
+    { id: 'chat', icon: MessageSquare, label: '洞察搜索' },
     { id: 'research', icon: LineChart, label: '正式研究' },
   ];
 

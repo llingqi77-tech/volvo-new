@@ -16,7 +16,7 @@ export default function PersonaLibrary() {
   const [selectedSubTags, setSelectedSubTags] = useState<string[]>([]);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
-  const [selectedPdfFile, setSelectedPdfFile] = useState<File | null>(null);
+  const [selectedPdfFiles, setSelectedPdfFiles] = useState<File[]>([]);
   const [isParsing, setIsParsing] = useState(false);
   const uploadRef = useRef<HTMLInputElement>(null);
 
@@ -130,19 +130,29 @@ export default function PersonaLibrary() {
     });
   }, [filteredPersonas, tags]);
 
-  const onPickPdf = (file: File | null) => {
-    if (!file) return;
-    if (file.type !== 'application/pdf') {
-      window.alert('请上传 PDF 文件');
-      return;
-    }
+  const onPickPdfFiles = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+
     const maxSizeMB = 20;
     const maxSizeBytes = maxSizeMB * 1024 * 1024;
-    if (file.size > maxSizeBytes) {
-      window.alert(`文件大小超过 ${maxSizeMB} MB 限制，请选择更小的文件`);
-      return;
+
+    const valid: File[] = [];
+    for (let i = 0; i < files.length; i += 1) {
+      const file = files[i];
+      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      if (!isPdf) {
+        window.alert('请上传 PDF 文件');
+        continue;
+      }
+      if (file.size > maxSizeBytes) {
+        window.alert(`文件大小超过 ${maxSizeMB} MB 限制：${file.name}`);
+        continue;
+      }
+      valid.push(file);
     }
-    setSelectedPdfFile(file);
+
+    if (valid.length === 0) return;
+    setSelectedPdfFiles((prev) => [...prev, ...valid]);
   };
 
   // 处理一级分类点击
@@ -193,34 +203,38 @@ export default function PersonaLibrary() {
   };
 
   const handleCreatePersona = async () => {
-    if (!selectedPdfFile) {
+    if (selectedPdfFiles.length === 0) {
       window.alert('请先上传 PDF 文件');
       return;
     }
 
     setIsParsing(true);
     try {
-      // 解析 PDF
-      const text = await extractPdfText(selectedPdfFile);
-      const snippet = text ? text.slice(0, 200) : '已解析文档基础信息';
+      const createdBatch = [];
+      for (let idx = 0; idx < selectedPdfFiles.length; idx += 1) {
+        const file = selectedPdfFiles[idx];
+        const text = await extractPdfText(file);
+        const snippet = text ? text.slice(0, 200) : '已解析文档基础信息';
 
-      // 生成人设
-      const created = {
-        id: `p-${Date.now()}`,
-        name: selectedPdfFile.name.replace(/\.pdf$/i, '').slice(0, 20) || '新建人设',
-        tags: ['PDF解析', '新建'],
-        score: 8.6,
-        conf: 90,
-        category: '数字触点与线上行为',
-        subCategory: '内容偏好',
-        cdpTags: ['PDF解析生成', '待补充画像', '自动识别'],
-        voc: `基于上传文档自动生成的人设。文档摘要：${snippet}...`,
-        radar: [75, 78, 72, 70, 80, 76, 73],
-      };
+        const created = {
+          id: `p-${Date.now()}-${idx}`,
+          name: file.name.replace(/\.pdf$/i, '').slice(0, 20) || '新建人设',
+          tags: ['PDF解析', '新建'],
+          score: 8.6,
+          conf: 90,
+          category: '数字触点与线上行为',
+          subCategory: '内容偏好',
+          cdpTags: ['PDF解析生成', '待补充画像', '自动识别'],
+          voc: `基于上传文档自动生成的人设。文档摘要：${snippet}...`,
+          radar: [75, 78, 72, 70, 80, 76, 73],
+        };
 
-      setAllPersonas((prev) => [created, ...prev]);
+        createdBatch.push(created);
+      }
+
+      setAllPersonas((prev) => [...createdBatch, ...prev]);
       setIsCreateModalOpen(false);
-      setSelectedPdfFile(null);
+      setSelectedPdfFiles([]);
       setIsParsing(false);
     } catch (error) {
       console.error('PDF 解析失败:', error);
@@ -565,9 +579,10 @@ export default function PersonaLibrary() {
           <input
             ref={uploadRef}
             type="file"
+            multiple
             accept=".pdf,application/pdf"
             className="hidden"
-            onChange={(e) => onPickPdf(e.target.files?.[0] ?? null)}
+            onChange={(e) => onPickPdfFiles(e.target.files)}
           />
 
           <div
@@ -575,7 +590,7 @@ export default function PersonaLibrary() {
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
               e.preventDefault();
-              onPickPdf(e.dataTransfer.files?.[0] ?? null);
+              onPickPdfFiles(e.dataTransfer.files);
             }}
             className="border-2 border-dashed border-white/20 rounded-xl p-12 flex flex-col items-center justify-center hover:border-primary/50 transition-colors cursor-pointer"
           >
@@ -583,8 +598,20 @@ export default function PersonaLibrary() {
             <p className="text-white font-bold mb-2">点击或拖拽 PDF 至此</p>
             <p className="text-gray-500 text-xs mb-1">系统将自动解析 PDF 内容生成人设</p>
             <p className="text-gray-500 text-xs">支持 PDF 格式，最大 20MB</p>
-            {selectedPdfFile && (
-              <p className="text-xs text-primary mt-3">已选择：{selectedPdfFile.name}</p>
+            {selectedPdfFiles.length > 0 && (
+              <div className="text-xs text-primary mt-3 w-full">
+                <p>已选择：{selectedPdfFiles.length} 个 PDF</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {selectedPdfFiles.slice(0, 3).map((f) => (
+                    <span key={`${f.name}-${f.size}`} className="px-2 py-1 bg-surface-hover text-gray-300 rounded">
+                      {f.name}
+                    </span>
+                  ))}
+                  {selectedPdfFiles.length > 3 && (
+                    <span className="px-2 py-1 bg-surface-hover text-gray-300 rounded">+{selectedPdfFiles.length - 3} 更多</span>
+                  )}
+                </div>
+              </div>
             )}
           </div>
 
@@ -599,7 +626,7 @@ export default function PersonaLibrary() {
             <button
               onClick={() => {
                 setIsCreateModalOpen(false);
-                setSelectedPdfFile(null);
+                setSelectedPdfFiles([]);
               }}
               className="px-6 py-2 rounded-lg text-sm font-bold text-gray-400 hover:text-white transition-colors"
             >
@@ -607,7 +634,7 @@ export default function PersonaLibrary() {
             </button>
             <button
               onClick={handleCreatePersona}
-              disabled={!selectedPdfFile || isParsing}
+              disabled={selectedPdfFiles.length === 0 || isParsing}
               className="px-6 py-2 rounded-lg text-sm font-bold bg-primary text-black hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
               {isParsing ? '解析中...' : '生成人设'}
