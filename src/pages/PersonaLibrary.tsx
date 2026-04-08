@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Plus, ArrowLeft, FileUp, Bot, Send } from 'lucide-react';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer } from 'recharts';
 import Modal from '../components/Modal';
@@ -13,12 +13,12 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 export default function PersonaLibrary() {
   // 筛选状态
   const [selectedTagValues, setSelectedTagValues] = useState<Record<string, string>>({});
-  const [selectedProvenance, setSelectedProvenance] = useState<Array<'first' | 'first_third'>>([]);
-  const [activeFieldKey, setActiveFieldKey] = useState<string | null>(null);
-  const [floatingStyle, setFloatingStyle] = useState<{ left: number; top: number; width: number }>({
-    left: 0,
+  const [selectedProvenance, setSelectedProvenance] = useState<Array<'first' | 'third' | 'deep_interview'>>([]);
+  const [activeTagPoolCategory, setActiveTagPoolCategory] = useState<string | null>(null);
+  const [tagPoolStyle, setTagPoolStyle] = useState<{ top: number; left: number; width: number }>({
     top: 0,
-    width: 180,
+    left: 0,
+    width: 560,
   });
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
@@ -28,8 +28,7 @@ export default function PersonaLibrary() {
   const [selectedPdfFiles, setSelectedPdfFiles] = useState<File[]>([]);
   const [isParsing, setIsParsing] = useState(false);
   const uploadRef = useRef<HTMLInputElement>(null);
-  const floatingDropdownRef = useRef<HTMLDivElement>(null);
-  const hoverCloseTimerRef = useRef<number | null>(null);
+  const tagPoolCloseTimerRef = useRef<number | null>(null);
 
   type TagField = { key: string; label: string; options: string[] };
   const filterSchema: Array<{ category: string; fields: TagField[] }> = [
@@ -86,7 +85,7 @@ export default function PersonaLibrary() {
     ]},
   ];
 
-  type PersonaProvenance = 'first' | 'first_third';
+  type PersonaProvenance = 'first' | 'third' | 'deep_interview';
   type Persona = {
     id: string;
     name: string;
@@ -103,12 +102,14 @@ export default function PersonaLibrary() {
 
   const provenanceLabel: Record<PersonaProvenance, string> = {
     first: '一方',
-    first_third: '一方+三方',
+    third: '三方',
+    deep_interview: '深度访谈',
   };
 
   const provenanceBadgeClass: Record<PersonaProvenance, string> = {
     first: 'bg-primary/15 text-primary border-primary/30',
-    first_third: 'bg-blue-500/15 text-blue-300 border-blue-500/30',
+    third: 'bg-blue-500/15 text-blue-300 border-blue-500/30',
+    deep_interview: 'bg-purple-500/15 text-purple-300 border-purple-500/30',
   };
 
   const getVocKeywords = (voc: string, limit = 6) => {
@@ -219,7 +220,7 @@ export default function PersonaLibrary() {
     { id: 'p-40', name: '古天乐', tags: ['社群活跃', '车友会'], score: 8.7, conf: 92, category: '品牌认知与情感连接', subCategory: '社群参与', cdpTags: ['车友会成员', '活动参与', '社群贡献'], voc: '我经常参加车友会活动，和其他车主交流用车心得。', radar: [82, 85, 88, 90, 85, 88, 95] },
   ] as Array<Omit<Persona, 'provenance'>>).map((p, idx) => ({
     ...p,
-    provenance: idx % 2 === 0 ? 'first' : 'first_third',
+    provenance: idx % 3 === 0 ? 'first' : idx % 3 === 1 ? 'third' : 'deep_interview',
   })));
 
   const allFields = filterSchema.flatMap((group) => group.fields);
@@ -288,33 +289,39 @@ export default function PersonaLibrary() {
   const resetFilters = () => {
     setSelectedProvenance([]);
     setSelectedTagValues({});
-    setActiveFieldKey(null);
+    setActiveTagPoolCategory(null);
   };
 
-  useEffect(() => {
-    const onDocMouseDown = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (!floatingDropdownRef.current?.contains(target)) {
-        setActiveFieldKey(null);
-      }
-    };
-    document.addEventListener('mousedown', onDocMouseDown);
-    return () => document.removeEventListener('mousedown', onDocMouseDown);
-  }, []);
-
-  const scheduleCloseFloating = () => {
-    if (hoverCloseTimerRef.current) {
-      window.clearTimeout(hoverCloseTimerRef.current);
+  const scheduleCloseTagPool = () => {
+    if (tagPoolCloseTimerRef.current) {
+      window.clearTimeout(tagPoolCloseTimerRef.current);
     }
-    hoverCloseTimerRef.current = window.setTimeout(() => {
-      setActiveFieldKey(null);
+    tagPoolCloseTimerRef.current = window.setTimeout(() => {
+      setActiveTagPoolCategory(null);
     }, 120);
   };
 
-  const keepFloatingOpen = () => {
-    if (hoverCloseTimerRef.current) {
-      window.clearTimeout(hoverCloseTimerRef.current);
-      hoverCloseTimerRef.current = null;
+  const keepTagPoolOpen = (category: string, anchorEl?: HTMLElement | null) => {
+    if (tagPoolCloseTimerRef.current) {
+      window.clearTimeout(tagPoolCloseTimerRef.current);
+      tagPoolCloseTimerRef.current = null;
+    }
+    setActiveTagPoolCategory(category);
+    if (anchorEl) {
+      const rect = anchorEl.getBoundingClientRect();
+      const viewportPadding = 12;
+      const preferredWidth = 560;
+      const width = Math.min(preferredWidth, Math.max(320, window.innerWidth - viewportPadding * 2));
+      const preferredLeft = rect.right + 8;
+      const left = Math.max(
+        viewportPadding,
+        Math.min(preferredLeft, window.innerWidth - width - viewportPadding),
+      );
+      const top = Math.max(
+        viewportPadding,
+        Math.min(rect.top, window.innerHeight - 360 - viewportPadding),
+      );
+      setTagPoolStyle({ top, left, width });
     }
   };
 
@@ -583,13 +590,43 @@ export default function PersonaLibrary() {
       </div>
 
       <div className="grid grid-cols-12 gap-6 mb-8">
-        <div className="col-span-9 flex flex-col gap-4">
-          <div className="bg-surface rounded-xl p-4">
-            <div className="flex items-center gap-3">
-              <span className="text-lg font-bold text-white shrink-0">信源筛选</span>
+        <div className="col-span-12 bg-surface p-4 rounded-xl">
+          <p className="text-white text-base font-bold mb-2">已筛选标签值</p>
+          <div className="mb-1 text-xs text-gray-400">
+            当前命中人设：<span className="text-white font-bold">{filteredPersonas.length}</span>
+          </div>
+          <div className="mb-2 text-xs text-gray-400">
+            当前已选标签：<span className="text-white font-bold">{selectedTagCount}</span>
+          </div>
+          <div className="flex flex-wrap gap-x-3 gap-y-1 mb-3">
+            {selectedProvenance.map((p) => (
+              <span key={p} className="text-[12px] font-semibold text-lime-300">
+                信源：{provenanceLabel[p]}
+              </span>
+            ))}
+            {Object.entries(selectedTagValues).map(([key, value]) => {
+              const field = allFieldMap.get(key);
+              if (!field || !value) return null;
+              return (
+                <span key={key} className="text-[12px] font-semibold text-primary">
+                  {field.label}：{value}
+                </span>
+              );
+            })}
+            {selectedProvenance.length === 0 && Object.keys(selectedTagValues).length === 0 && (
+              <span className="text-[11px] text-gray-500">暂无筛选条件</span>
+            )}
+          </div>
+
+          <div className="grid grid-cols-12 gap-2 items-center mb-3">
+            <div className="col-span-2">
+              <span className="text-base font-bold text-white">信源筛选</span>
+            </div>
+            <div className="col-span-10 flex items-center gap-[3px]">
               {([
                 { id: 'first' as const, label: '一方' },
-                { id: 'first_third' as const, label: '一方+三方' },
+                { id: 'third' as const, label: '三方' },
+                { id: 'deep_interview' as const, label: '深度访谈' },
               ]).map((opt) => {
                 const active = selectedProvenance.includes(opt.id);
                 return (
@@ -600,10 +637,10 @@ export default function PersonaLibrary() {
                         prev.includes(opt.id) ? prev.filter((x) => x !== opt.id) : [...prev, opt.id],
                       );
                     }}
-                    className={`px-3 py-1.5 text-xs rounded transition-colors border ${
+                    className={`text-[12px] transition-colors ${
                       active
-                        ? 'bg-primary text-black border-primary'
-                        : 'bg-surface-hover text-gray-300 hover:bg-[#353534] border-white/10'
+                        ? 'text-primary font-semibold'
+                        : 'text-gray-300 hover:text-white'
                     }`}
                   >
                     {opt.label}
@@ -613,129 +650,96 @@ export default function PersonaLibrary() {
             </div>
           </div>
 
-          <div className="bg-surface p-6 rounded-xl">
-            <p className="text-white text-lg font-bold mb-6">标签筛选</p>
+          <p className="text-white text-base font-bold mb-3">标签筛选</p>
+          <div className="space-y-1.5 mb-3">
+            {filterSchema.map((group) => {
+              const isPoolOpen = activeTagPoolCategory === group.category;
 
-          {filterSchema.map((group) => (
-            <div key={group.category} className="mb-6">
-              <h3 className="text-white font-bold text-sm mb-3">{group.category}</h3>
-              <div className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-visible pb-1">
-                {group.fields.map((field) => (
-                  <div key={field.key} className="relative shrink-0">
-                    <button
-                      type="button"
-                      onMouseEnter={(e) => {
-                        keepFloatingOpen();
-                        const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-                        const padding = 8;
-                        const font = window.getComputedStyle(e.currentTarget).font || '12px sans-serif';
-                        const measure = document.createElement('canvas').getContext('2d');
-                        if (measure) measure.font = font;
-                        const labels = ['全部', ...(allFieldMap.get(field.key)?.options ?? [])];
-                        const maxTextWidth = Math.max(
-                          ...labels.map((text) => (measure ? measure.measureText(text).width : text.length * 12)),
-                        );
-                        const width = Math.max(rect.width, Math.ceil(maxTextWidth + 44));
-                        const left = Math.max(padding, Math.min(rect.left, window.innerWidth - width - padding));
-                        const top = rect.bottom + 6;
-                        setFloatingStyle({ left, top, width });
-                        setActiveFieldKey(field.key);
-                      }}
-                      onMouseLeave={scheduleCloseFloating}
-                      className={`w-full text-left px-3 py-2 rounded-lg text-xs border transition-colors bg-surface-hover text-gray-200 border-white/10 hover:bg-[#353534] ${
-                        selectedTagValues[field.key] ? 'ring-1 ring-primary/40' : ''
-                      }`}
-                    >
-                      {field.label}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-
-            {/* 全部按钮 */}
-            <button
-              onClick={resetFilters}
-              className={`w-full px-4 py-2.5 text-sm font-bold rounded transition-colors ${
-                Object.keys(selectedTagValues).length === 0 && selectedProvenance.length === 0
-                  ? 'bg-primary text-black'
-                  : 'bg-surface-hover text-gray-300 hover:bg-[#353534]'
-              }`}
-            >
-              全部
-            </button>
-          </div>
-        </div>
-
-        <div className="col-span-3 bg-surface rounded-xl p-6 h-full self-stretch">
-          <p className="text-white text-lg font-bold mb-4">已筛选标签值</p>
-          <div className="mb-2 text-sm text-gray-400">
-            当前命中人设：<span className="text-white font-bold">{filteredPersonas.length}</span>
-          </div>
-          <div className="mb-4 text-sm text-gray-400">
-            当前已选标签：<span className="text-white font-bold">{selectedTagCount}</span>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {selectedProvenance.map((p) => (
-              <span key={p} className="px-3 py-1 rounded bg-primary/15 text-primary text-xs border border-primary/30">
-                信源：{provenanceLabel[p]}
-              </span>
-            ))}
-            {Object.entries(selectedTagValues).map(([key, value]) => {
-              const field = allFieldMap.get(key);
-              if (!field || !value) return null;
               return (
-                <span key={key} className="px-3 py-1 rounded bg-surface-hover text-gray-200 text-xs border border-white/10">
-                  {field.label}：{value}
-                </span>
+                <div key={group.category} className="relative grid grid-cols-12 gap-2 items-center py-1">
+                  <div className="col-span-2">
+                    <p className="text-[12px] font-bold text-white leading-5">{group.category}</p>
+                  </div>
+
+                  <div
+                    className="col-span-10 flex items-center gap-[3px] text-[11px] text-gray-300 leading-5 truncate cursor-default"
+                    onMouseEnter={(e) => keepTagPoolOpen(group.category, e.currentTarget as HTMLElement)}
+                    onMouseLeave={scheduleCloseTagPool}
+                    title={group.fields.map((f) => f.label).join('/')}
+                  >
+                    {group.fields.map((f, idx) => (
+                      <span key={f.key} className="inline-flex items-center shrink-0">
+                        {f.label}
+                        {idx < group.fields.length - 1 && <span className="mx-[3px] text-gray-500">/</span>}
+                      </span>
+                    ))}
+                  </div>
+
+                  {isPoolOpen && (
+                    <div
+                      className="fixed z-30 bg-surface border border-white/10 rounded-lg p-3 shadow-2xl"
+                      style={{ top: tagPoolStyle.top, left: tagPoolStyle.left, width: tagPoolStyle.width }}
+                      onMouseEnter={() => keepTagPoolOpen(group.category)}
+                      onMouseLeave={scheduleCloseTagPool}
+                    >
+                      <p className="text-xs font-bold text-white mb-2">{group.category} 标签池</p>
+                      <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                        {group.fields.map((field) => {
+                          const currentValue = selectedTagValues[field.key] ?? '全部';
+                          return (
+                            <div key={field.key} className="grid grid-cols-12 gap-2 items-start">
+                              <div className="col-span-3 text-[11px] text-gray-400 pt-1">{field.label}</div>
+                              <div className="col-span-9 flex flex-wrap gap-x-3 gap-y-1">
+                                {['全部', ...field.options].map((opt) => {
+                                  const selected = currentValue === opt;
+                                  return (
+                                    <button
+                                      key={`${field.key}-${opt}`}
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedTagValues((prev) => {
+                                          if (opt === '全部') {
+                                            const next = { ...prev };
+                                            delete next[field.key];
+                                            return next;
+                                          }
+                                          return { ...prev, [field.key]: opt };
+                                        });
+                                      }}
+                                      className={`text-[11px] transition-colors ${
+                                        selected
+                                          ? 'text-primary'
+                                          : 'text-gray-300 hover:text-white'
+                                      }`}
+                                    >
+                                      {opt}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
               );
             })}
-            {selectedProvenance.length === 0 && Object.keys(selectedTagValues).length === 0 && (
-              <span className="text-xs text-gray-500">暂无筛选条件</span>
-            )}
           </div>
+
+          <button
+            onClick={resetFilters}
+            className={`w-full px-4 py-2 text-xs font-bold rounded transition-colors ${
+              Object.keys(selectedTagValues).length === 0 && selectedProvenance.length === 0
+                ? 'bg-primary text-black'
+                : 'bg-surface-hover text-gray-300 hover:bg-[#353534]'
+            }`}
+          >
+            全部
+          </button>
         </div>
       </div>
-
-      {activeFieldKey && (
-        <div
-          ref={floatingDropdownRef}
-          className="fixed z-[120]"
-          style={{ left: floatingStyle.left, top: floatingStyle.top, width: floatingStyle.width }}
-          onMouseEnter={keepFloatingOpen}
-          onMouseLeave={scheduleCloseFloating}
-        >
-          <div className="bg-surface border border-white/10 rounded-lg p-2 shadow-2xl max-h-64 overflow-y-auto">
-            {['全部', ...(allFieldMap.get(activeFieldKey)?.options ?? [])].map((opt) => {
-              const selected = (selectedTagValues[activeFieldKey] ?? '全部') === opt;
-              return (
-                <button
-                  key={opt}
-                  type="button"
-                  onClick={() => {
-                    setSelectedTagValues((prev) => {
-                      if (opt === '全部') {
-                        const next = { ...prev };
-                        delete next[activeFieldKey];
-                        return next;
-                      }
-                      return { ...prev, [activeFieldKey]: opt };
-                    });
-                  }}
-                  className={`w-full text-left px-2 py-1.5 rounded text-xs transition-colors ${
-                    selected
-                      ? 'bg-primary text-black'
-                      : 'text-gray-200 hover:bg-surface-hover'
-                  }`}
-                >
-                  {opt}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       <div className="grid grid-cols-3 gap-6">
         {filteredPersonas.map((p) => (

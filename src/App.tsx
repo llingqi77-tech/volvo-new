@@ -8,8 +8,7 @@ import Sidebar from './components/Sidebar';
 import Topbar from './components/Topbar';
 import KnowledgeBase from './pages/KnowledgeBase';
 import PersonaLibrary from './pages/PersonaLibrary';
-import ChatMode from './pages/ChatMode';
-import FormalResearch from './pages/FormalResearch';
+import InsightResearch from './pages/InsightResearch';
 import ProfileCenter from './pages/ProfileCenter';
 
 export type KnowledgeDoc = {
@@ -110,8 +109,7 @@ export default function App() {
         <main className="flex-1 overflow-y-auto">
           {activeModule === 'knowledge' && <KnowledgeBase docs={docs} setDocs={setDocs} />}
           {activeModule === 'persona' && <PersonaLibrary />}
-          {activeModule === 'chat' && <ChatMode />}
-          {activeModule === 'research' && <FormalResearch isSidebarCollapsed={isSidebarCollapsed} />}
+          {activeModule === 'insight-research' && <InsightResearch isSidebarCollapsed={isSidebarCollapsed} />}
           {(activeModule === 'profile-info' || activeModule === 'profile-research') && (
             <ProfileCenter section={activeModule === 'profile-research' ? 'research' : 'info'} />
           )}

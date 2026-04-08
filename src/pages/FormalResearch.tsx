@@ -133,10 +133,22 @@ function fallbackVerifyQuestion(round: number): {
   }
 }
 
-export default function FormalResearch({ isSidebarCollapsed = false }: { isSidebarCollapsed?: boolean }) {
-  const [phase, setPhase] = useState<'gate' | 'flow'>('gate');
-  const [step, setStep] = useState(2);
-  const [userInput, setUserInput] = useState('');
+export default function FormalResearch({
+  isSidebarCollapsed = false,
+  embedded = false,
+  initialStep = 2,
+  initialInput = '',
+  onStepChange,
+}: {
+  isSidebarCollapsed?: boolean;
+  embedded?: boolean;
+  initialStep?: number;
+  initialInput?: string;
+  onStepChange?: (step: number) => void;
+}) {
+  const [phase, setPhase] = useState<'gate' | 'flow'>(embedded ? 'flow' : 'gate');
+  const [step, setStep] = useState(initialStep);
+  const [userInput, setUserInput] = useState(initialInput);
   const [classification, setClassification] = useState<{
     kind: string;
     framework: string;
@@ -145,6 +157,28 @@ export default function FormalResearch({ isSidebarCollapsed = false }: { isSideb
   } | null>(null);
   const [verificationAnswers, setVerificationAnswers] = useState<Array<{ question: string; answer: string[] }>>([]);
   const [selectedPlanVersion, setSelectedPlanVersion] = useState<any>(null);
+
+  useEffect(() => {
+    onStepChange?.(step);
+  }, [step, onStepChange]);
+
+  useEffect(() => {
+    if (embedded) {
+      setPhase('flow');
+    }
+  }, [embedded]);
+
+  useEffect(() => {
+    if (embedded) {
+      setStep(initialStep);
+    }
+  }, [embedded, initialStep]);
+
+  useEffect(() => {
+    if (embedded) {
+      setUserInput(initialInput);
+    }
+  }, [embedded, initialInput]);
 
   if (phase === 'gate') {
     return (
