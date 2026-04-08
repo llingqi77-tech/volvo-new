@@ -13,6 +13,7 @@ export default function KnowledgeBase({
   const [activeCategory, setActiveCategory] = useState('全库文档');
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedUploader, setSelectedUploader] = useState<string>('全部');
   const [selectedUploadFiles, setSelectedUploadFiles] = useState<File[]>([]);
   const [uploadCategory, setUploadCategory] = useState<'洞察报告库' | '整车知识库' | '行业知识库'>('洞察报告库');
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
@@ -86,10 +87,13 @@ export default function KnowledgeBase({
 
   const totalDocs = docs.length;
 
+  const uploaderOptions = ['全部', ...Array.from(new Set(docs.map((d) => d.uploader))).sort()];
+
   const filteredDocs = docs.filter(doc => {
     const matchesCategory = activeCategory === '全库文档' || doc.category === activeCategory;
     const matchesSearch = doc.title.toLowerCase().includes(searchQuery.toLowerCase()) || doc.tags.some(t => t.toLowerCase().includes(searchQuery.toLowerCase()));
-    return matchesCategory && matchesSearch;
+    const matchesUploader = selectedUploader === '全部' || doc.uploader === selectedUploader;
+    return matchesCategory && matchesSearch && matchesUploader;
   });
 
   const handleDeleteDoc = (docId: string, title: string) => {
@@ -125,7 +129,7 @@ export default function KnowledgeBase({
     <div className="p-10 max-w-7xl mx-auto">
       <div className="flex justify-between items-end mb-12">
         <div>
-          <h1 className="text-4xl font-extrabold text-white mb-2">知识库管理</h1>
+          <h1 className="text-4xl font-extrabold text-white mb-2 tracking-normal whitespace-nowrap">知识库管理</h1>
         </div>
         <button 
           onClick={() => setIsUploadModalOpen(true)}
@@ -210,15 +214,32 @@ export default function KnowledgeBase({
             </button>
           ))}
         </div>
-        <div className="relative w-80">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
-          <input 
-            type="text" 
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="搜索文档标题、关键词..." 
-            className="w-full bg-surface border-none rounded-lg py-2 pl-10 pr-4 text-sm text-white focus:ring-1 focus:ring-primary outline-none" 
-          />
+        <div className="flex items-center gap-3">
+          <div className="relative w-80">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
+            <input 
+              type="text" 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="搜索文档标题、关键词..." 
+              className="w-full bg-surface border-none rounded-lg py-2 pl-10 pr-4 text-sm text-white focus:ring-1 focus:ring-primary outline-none" 
+            />
+          </div>
+          <div className="relative">
+            <select
+              value={selectedUploader}
+              onChange={(e) => setSelectedUploader(e.target.value)}
+              className="bg-surface border border-white/10 rounded-lg py-2 pl-3 pr-8 text-sm text-white outline-none focus:ring-1 focus:ring-primary"
+              aria-label="按上传人筛选"
+              title="按上传人筛选"
+            >
+              {uploaderOptions.map((u) => (
+                <option key={u} value={u}>
+                  {u === '全部' ? '上传人：全部' : u}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 

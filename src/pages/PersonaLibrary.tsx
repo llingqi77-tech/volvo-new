@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState } from 'react';
-import { Plus, ArrowLeft, FileUp } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Plus, ArrowLeft, FileUp, Bot, Send } from 'lucide-react';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer } from 'recharts';
 import Modal from '../components/Modal';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -11,28 +11,161 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 ).toString();
 
 export default function PersonaLibrary() {
-  // 支持多选的状态管理
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
-  const [selectedSubTags, setSelectedSubTags] = useState<string[]>([]);
+  // 筛选状态
+  const [selectedTagValues, setSelectedTagValues] = useState<Record<string, string>>({});
+  const [selectedProvenance, setSelectedProvenance] = useState<Array<'first' | 'first_third'>>([]);
+  const [activeFieldKey, setActiveFieldKey] = useState<string | null>(null);
+  const [floatingStyle, setFloatingStyle] = useState<{ left: number; top: number; width: number }>({
+    left: 0,
+    top: 0,
+    width: 180,
+  });
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
+  const [isPersonaChatOpen, setIsPersonaChatOpen] = useState(false);
+  const [personaChatInput, setPersonaChatInput] = useState('');
+  const [personaChatMessages, setPersonaChatMessages] = useState<Array<{ id: string; role: 'user' | 'assistant'; text: string }>>([]);
   const [selectedPdfFiles, setSelectedPdfFiles] = useState<File[]>([]);
   const [isParsing, setIsParsing] = useState(false);
   const uploadRef = useRef<HTMLInputElement>(null);
+  const floatingDropdownRef = useRef<HTMLDivElement>(null);
+  const hoverCloseTimerRef = useRef<number | null>(null);
 
-  const tags = ['全部', '身份与基础属性', '社会与人口统计', '购车决策与潜客行为', '车辆使用与售后服务', '数字触点与线上行为', '品牌认知与情感连接'];
+  type TagField = { key: string; label: string; options: string[] };
+  const filterSchema: Array<{ category: string; fields: TagField[] }> = [
+    { category: '身份信息', fields: [
+      { key: 'gender', label: '性别', options: ['男', '女'] },
+      { key: 'age', label: '年龄', options: ['18–25', '26–35', '36–45', '46–60'] },
+      { key: 'maritalStatus', label: '婚姻状况', options: ['未婚', '已婚', '离异'] },
+      { key: 'province', label: '省份', options: ['北京', '上海', '广东', '浙江', '四川'] },
+      { key: 'familySize', label: '家庭人数', options: ['1', '2', '3', '4', '5+'] },
+      { key: 'familyStructure', label: '家庭结构', options: ['未婚', '已婚无孩', '已婚1孩', '已婚多孩'] },
+    ]},
+    { category: '用户属性', fields: [
+      { key: 'education', label: '学历', options: ['本科及以上', '本科以下'] },
+      { key: 'industry', label: '行业', options: ['白领（互联网/金融）', '体制内', '自由职业', '制造业', '其他'] },
+      { key: 'occupation', label: '职业', options: ['企业职员', '管理层', '自由职业', '公务员', '学生'] },
+      { key: 'annualIncome', label: '年收入', options: ['10万以下', '10–30万', '30–50万', '50万以上'] },
+      { key: 'familyMonthlyIncome', label: '家庭月收入', options: ['1万以下', '1–3万', '3–5万', '5–10万', '10万以上'] },
+      { key: 'customerType', label: '客户类型', options: ['个人', '企业'] },
+    ]},
+    { category: '生命周期', fields: [
+      { key: 'salesType', label: '售卖类型', options: ['新车', '二手车'] },
+      { key: 'purchaseType', label: '购买类型', options: ['首购', '增购', '置换'] },
+      { key: 'latestOrderStatus', label: '最近订单状态', options: ['未下单', '已下单', '已交车', '已取消'] },
+    ]},
+    { category: '车辆资产', fields: [
+      { key: 'isVolvoOwner', label: '是否Volvo车主', options: ['是', '否'] },
+      { key: 'model', label: '车型', options: ['XC40', 'XC60', 'XC90', 'S60', 'S90'] },
+      { key: 'powerType', label: '动力类别', options: ['燃油', '混动', '纯电'] },
+      { key: 'vehicleAge', label: '购车车龄', options: ['<3年', '3–5年', '5–8年', '8年以上'] },
+      { key: 'salesMode', label: '销售模式', options: ['直售', '经销商'] },
+    ]},
+    { category: '行为标签', fields: [
+      { key: 'multiStoreVisit', label: '是否多次到店', options: ['是', '否'] },
+      { key: 'latestTestDriveModel', label: '最近试驾车型', options: ['XC40', 'XC60', 'XC90', 'S60', 'S90'] },
+      { key: 'latestTestDriveTime', label: '最近试驾时间', options: ['最近7天', '最近30天', '30天以上'] },
+      { key: 'modelInterest', label: '车型兴趣强度', options: ['高（多次浏览/试驾）', '中', '低'] },
+      { key: 'latestInterestedModel', label: '最近感兴趣车型', options: ['XC40', 'XC60', 'XC90', 'S60', 'S90'] },
+    ]},
+    { category: '偏好标签', fields: [
+      { key: 'lifestyleTag', label: '生活方式标签', options: ['运动', '旅行', '家庭导向', '科技爱好', '美食'] },
+      { key: 'bodyTypePreference', label: '车型偏好', options: ['SUV', '轿车'] },
+      { key: 'purchaseFocus', label: '购车关注点', options: ['外观', '空间', '安全', '智能化', '性价比', '品牌'] },
+    ]},
+    { category: '购车决策', fields: [
+      { key: 'budget', label: '购车预算', options: ['20万以下', '20–30万', '30–40万', '40–50万', '50万以上'] },
+      { key: 'priceSensitivity', label: '价格敏感度', options: ['高', '中', '低'] },
+      { key: 'brandSensitivity', label: '品牌敏感度', options: ['高', '中', '低'] },
+      { key: 'performanceFocus', label: '性能关注度', options: ['高', '中', '低'] },
+      { key: 'purchaseUsage', label: '购车用途', options: ['通勤', '家庭', '商务', '长途'] },
+      { key: 'actualDriver', label: '实际驾驶人', options: ['自己', '家庭成员', '公司'] },
+      { key: 'competitorBrand', label: '竞争品牌', options: ['宝马', '奔驰', '奥迪', '新势力'] },
+      { key: 'competitorModel', label: '竞品车型', options: ['宝马X3', '奔驰GLC', '奥迪Q5'] },
+      { key: 'ownedBrand', label: '保有品牌', options: ['沃尔沃', '宝马', '奔驰', '奥迪', '无车'] },
+    ]},
+  ];
 
-  // 二级标签定义
-  const subTags: Record<string, string[]> = {
-    '身份与基础属性': ['年龄段', '职业类型', '收入水平', '教育背景', '家庭结构'],
-    '社会与人口统计': ['城市等级', '居住区域', '婚姻状况', '子女情况', '生活方式'],
-    '购车决策与潜客行为': ['购车动机', '决策周期', '信息渠道', '试驾偏好', '价格敏感度'],
-    '车辆使用与售后服务': ['用车场景', '里程需求', '保养频率', '服务期望', '品牌忠诚度'],
-    '数字触点与线上行为': ['社交平台', '内容偏好', '互动频率', '设备使用', '数字素养'],
-    '品牌认知与情感连接': ['品牌认知', '情感倾向', '价值观匹配', '推荐意愿', '社群参与']
+  type PersonaProvenance = 'first' | 'first_third';
+  type Persona = {
+    id: string;
+    name: string;
+    tags: string[];
+    score: number;
+    conf: number;
+    category: string;
+    subCategory: string;
+    cdpTags: string[];
+    voc: string;
+    radar: number[];
+    provenance: PersonaProvenance;
   };
 
-  const [allPersonas, setAllPersonas] = useState([
+  const provenanceLabel: Record<PersonaProvenance, string> = {
+    first: '一方',
+    first_third: '一方+三方',
+  };
+
+  const provenanceBadgeClass: Record<PersonaProvenance, string> = {
+    first: 'bg-primary/15 text-primary border-primary/30',
+    first_third: 'bg-blue-500/15 text-blue-300 border-blue-500/30',
+  };
+
+  const getVocKeywords = (voc: string, limit = 6) => {
+    const text = (voc ?? '')
+      .replace(/[“”"']/g, '')
+      .replace(/[。！？!?,，；;：:\(\)\[\]{}<>《》]/g, ' ')
+      .trim();
+    if (!text) return [] as string[];
+
+    const candidates = text.match(/[\u4e00-\u9fa5A-Za-z0-9]{2,10}/g) ?? [];
+    const stop = new Set([
+      '用户', '车辆', '汽车', '希望', '需要', '一个', '不会', '就是', '觉得', '还是', '主要', '非常', '同时',
+      '可以', '比较', '因为', '如果', '自己', '这辆', '这个', '那些', '什么', '以及', '而且', '但是',
+    ]);
+    const freq = new Map<string, number>();
+    for (const w of candidates) {
+      const word = w.trim();
+      if (word.length < 2) continue;
+      if (stop.has(word)) continue;
+      freq.set(word, (freq.get(word) ?? 0) + 1);
+    }
+    return Array.from(freq.entries())
+      .sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)
+      .slice(0, limit)
+      .map(([w]) => w);
+  };
+
+  const getPersonaAlias = (p: Persona) => {
+    const normalize = (text: string) =>
+      text
+        .trim()
+        .replace(/[^\u4e00-\u9fa5A-Za-z0-9]/g, '')
+        .replace(/者$/g, '')
+        .slice(0, 5);
+
+    const tag1 = normalize(p.tags?.[0] || '');
+    const tag2 = normalize(p.tags?.[1] || '');
+    const cdp1 = normalize(p.cdpTags?.[0] || '');
+
+    // 无符号、最多5字：优先采用更有区分度的单一核心特征
+    if (tag1) return tag1;
+    if (tag2) return tag2;
+    if (cdp1) return cdp1;
+    return '典型画像';
+  };
+
+  const radarDimensionDetails: Array<{ title: string; desc: string }> = [
+    { title: '人口与成长轨迹', desc: '年龄/教育/城市与成长经历等背景要素如何塑造价值观与选择偏好。' },
+    { title: '心理动因', desc: '购买/使用背后的核心动机与触发点（安全感、效率、身份表达、家庭责任等）。' },
+    { title: '心理特征维度', desc: '风险偏好、控制感、理性/感性程度、对新事物的态度与决策风格。' },
+    { title: '行为维度', desc: '信息搜集、比较决策、试驾/到店、分享/推荐等可观测行为模式。' },
+    { title: '需求与痛点维度', desc: '明确诉求与真实痛点：空间/续航/充电/智能/舒适/成本等。' },
+    { title: '技术接受度维度', desc: '对智能化、自动驾驶、互联服务的学习意愿、信任边界与付费意愿。' },
+    { title: '社会关系维度', desc: '家庭/同伴/社群影响与口碑扩散路径，谁会影响其最终决定。' },
+  ];
+
+  const [allPersonas, setAllPersonas] = useState<Persona[]>(() => ([
     // 身份与基础属性 (8个)
     { id: 'p-1', name: '陈思远', tags: ['科技极客', '高净值'], score: 8.5, conf: 92, category: '身份与基础属性', subCategory: '职业类型', cdpTags: ['一线城市精英', '智能驾驶偏好', '高净值资产持有'], voc: '我希望车辆能在复杂城市路况下主动避险，而不是只做被动提醒。', radar: [78, 90, 84, 72, 88, 95, 66] },
     { id: 'p-2', name: '王建国', tags: ['企业高管', '成熟稳重'], score: 9.1, conf: 95, category: '身份与基础属性', subCategory: '职业类型', cdpTags: ['企业决策者', '商务出行', '品牌忠诚'], voc: '车辆是我的移动办公室，需要兼顾商务形象和实用性。', radar: [85, 88, 82, 78, 90, 75, 88] },
@@ -84,23 +217,38 @@ export default function PersonaLibrary() {
     { id: 'p-38', name: '彭于晏', tags: ['价值观一致', '理念认同'], score: 9.1, conf: 96, category: '品牌认知与情感连接', subCategory: '价值观匹配', cdpTags: ['北欧文化', '简约设计', '品质生活'], voc: '喜欢北欧的简约和品质感，这和我的生活态度一致。', radar: [88, 92, 90, 85, 90, 88, 95] },
     { id: 'p-39', name: '舒淇', tags: ['推荐意愿强', 'KOC'], score: 9.2, conf: 96, category: '品牌认知与情感连接', subCategory: '推荐意愿', cdpTags: ['主动推荐', '口碑传播', '影响他人'], voc: '我会主动向朋友推荐沃尔沃，已经成功安利了3个人。', radar: [85, 88, 90, 88, 92, 90, 98] },
     { id: 'p-40', name: '古天乐', tags: ['社群活跃', '车友会'], score: 8.7, conf: 92, category: '品牌认知与情感连接', subCategory: '社群参与', cdpTags: ['车友会成员', '活动参与', '社群贡献'], voc: '我经常参加车友会活动，和其他车主交流用车心得。', radar: [82, 85, 88, 90, 85, 88, 95] },
-  ]);
+  ] as Array<Omit<Persona, 'provenance'>>).map((p, idx) => ({
+    ...p,
+    provenance: idx % 2 === 0 ? 'first' : 'first_third',
+  })));
+
+  const allFields = filterSchema.flatMap((group) => group.fields);
+  const allFieldMap = new Map(allFields.map((f) => [f.key, f]));
+  const hashString = (s: string) => s.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+  const pickByHash = (options: string[], seed: string) => options[hashString(seed) % options.length];
+  const deriveTagValue = (p: Persona, field: TagField) => pickByHash(field.options, `${p.id}-${p.name}-${field.key}`);
+  const selectedTagCount = Object.keys(selectedTagValues).length + selectedProvenance.length;
 
   const filteredPersonas = useMemo(() => {
     let result = allPersonas;
 
-    // 如果选择了一级分类，进行筛选
-    if (selectedCategories.length > 0) {
-      result = result.filter(p => selectedCategories.includes(p.category));
+    if (selectedProvenance.length > 0) {
+      result = result.filter((p) => selectedProvenance.includes(p.provenance));
     }
 
-    // 如果选择了二级标签，进行筛选
-    if (selectedSubTags.length > 0) {
-      result = result.filter(p => selectedSubTags.includes(p.subCategory));
+    const selectedEntries = Object.entries(selectedTagValues).filter(([, v]) => !!v && v !== '全部');
+    if (selectedEntries.length > 0) {
+      result = result.filter((p) =>
+        selectedEntries.every(([key, value]) => {
+          const field = allFieldMap.get(key);
+          if (!field) return true;
+          return deriveTagValue(p, field) === value;
+        }),
+      );
     }
 
     return result;
-  }, [allPersonas, selectedCategories, selectedSubTags]);
+  }, [allPersonas, selectedProvenance, selectedTagValues]);
 
   const selectedPersona = useMemo(
     () => allPersonas.find((p) => p.id === selectedPersonaId) ?? null,
@@ -110,25 +258,6 @@ export default function PersonaLibrary() {
   const radarData = selectedPersona
     ? radarLabels.map((label, idx) => ({ subject: label, value: selectedPersona.radar[idx], fullMark: 100 }))
     : [];
-
-  const selectedDimensions = useMemo(() => {
-    return selectedCategories.length + selectedSubTags.length;
-  }, [selectedCategories, selectedSubTags]);
-
-  const dimensionDistribution = useMemo(() => {
-    return tags.slice(1).map((category) => {
-      const count = filteredPersonas.filter(p => p.category === category).length;
-      const shortName = category.replace(/与/g, '').slice(0, 4);
-      return {
-        subject: shortName,
-        count: count,
-        fullName: category,
-        fullMark: Math.max(...tags.slice(1).map(cat =>
-          filteredPersonas.filter(p => p.category === cat).length
-        ), 10)
-      };
-    });
-  }, [filteredPersonas, tags]);
 
   const onPickPdfFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -155,33 +284,38 @@ export default function PersonaLibrary() {
     setSelectedPdfFiles((prev) => [...prev, ...valid]);
   };
 
-  // 处理一级分类点击
-  const toggleCategory = (category: string) => {
-    setSelectedCategories(prev =>
-      prev.includes(category)
-        ? prev.filter(c => c !== category)
-        : [...prev, category]
-    );
-  };
-
-  // 处理二级标签点击
-  const toggleSubTag = (category: string, subTag: string) => {
-    // 确保对应的一级分类也被选中
-    if (!selectedCategories.includes(category)) {
-      setSelectedCategories(prev => [...prev, category]);
-    }
-
-    setSelectedSubTags(prev =>
-      prev.includes(subTag)
-        ? prev.filter(t => t !== subTag)
-        : [...prev, subTag]
-    );
-  };
-
   // 重置所有筛选
   const resetFilters = () => {
-    setSelectedCategories([]);
-    setSelectedSubTags([]);
+    setSelectedProvenance([]);
+    setSelectedTagValues({});
+    setActiveFieldKey(null);
+  };
+
+  useEffect(() => {
+    const onDocMouseDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!floatingDropdownRef.current?.contains(target)) {
+        setActiveFieldKey(null);
+      }
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, []);
+
+  const scheduleCloseFloating = () => {
+    if (hoverCloseTimerRef.current) {
+      window.clearTimeout(hoverCloseTimerRef.current);
+    }
+    hoverCloseTimerRef.current = window.setTimeout(() => {
+      setActiveFieldKey(null);
+    }, 120);
+  };
+
+  const keepFloatingOpen = () => {
+    if (hoverCloseTimerRef.current) {
+      window.clearTimeout(hoverCloseTimerRef.current);
+      hoverCloseTimerRef.current = null;
+    }
   };
 
   const extractPdfText = async (file: File) => {
@@ -227,6 +361,7 @@ export default function PersonaLibrary() {
           cdpTags: ['PDF解析生成', '待补充画像', '自动识别'],
           voc: `基于上传文档自动生成的人设。文档摘要：${snippet}...`,
           radar: [75, 78, 72, 70, 80, 76, 73],
+          provenance: 'first' as const,
         };
 
         createdBatch.push(created);
@@ -244,18 +379,110 @@ export default function PersonaLibrary() {
   };
 
   if (selectedPersona) {
+    const vocKeywords = getVocKeywords(selectedPersona.voc, 8);
+
+    if (isPersonaChatOpen) {
+      const handleSendPersonaChat = () => {
+        const q = personaChatInput.trim();
+        if (!q) return;
+        setPersonaChatMessages((prev) => [
+          ...prev,
+          { id: `u-${Date.now()}`, role: 'user', text: q },
+          {
+            id: `a-${Date.now() + 1}`,
+            role: 'assistant',
+            text: `基于「${getPersonaAlias(selectedPersona)}」的人设信息，我建议从这几个角度回答你的问题：\n1) 画像特征：${selectedPersona.tags.join('、')}\n2) 关键标签：${selectedPersona.cdpTags.slice(0, 3).join('、')}\n3) 典型声音：${selectedPersona.voc}\n\n如果你愿意，我可以继续把这个问题拆成可执行策略。`,
+          },
+        ]);
+        setPersonaChatInput('');
+      };
+
+      return (
+        <div className="p-10 max-w-7xl mx-auto min-h-screen">
+          <button
+            onClick={() => setIsPersonaChatOpen(false)}
+            className="mb-6 px-4 py-2 bg-surface hover:bg-surface-hover rounded text-sm flex items-center gap-2 text-white"
+          >
+            <ArrowLeft size={16} />
+            返回人设详情
+          </button>
+          <div className="bg-surface rounded-xl p-6 border border-white/10 mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center">
+                <Bot className="text-black" size={18} />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-white">与 {getPersonaAlias(selectedPersona)} 对话</h2>
+                <p className="text-xs text-gray-400">一对一人设智能对话</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-surface rounded-xl border border-white/10 p-6 h-[68vh] flex flex-col">
+            <div className="flex-1 overflow-y-auto space-y-4 pr-2">
+              {personaChatMessages.length === 0 && (
+                <div className="text-sm text-gray-400 bg-surface-hover rounded-lg p-4">
+                  你可以直接提问，例如：这个人设的购车决策风险点是什么？
+                </div>
+              )}
+              {personaChatMessages.map((m) => (
+                <div key={m.id} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+                  <div
+                    className={`max-w-[80%] px-4 py-3 rounded-2xl text-sm whitespace-pre-wrap ${
+                      m.role === 'user'
+                        ? 'bg-primary text-black'
+                        : 'bg-surface-hover text-gray-200 border border-white/10'
+                    }`}
+                  >
+                    {m.text}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 flex gap-2">
+              <input
+                value={personaChatInput}
+                onChange={(e) => setPersonaChatInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSendPersonaChat();
+                }}
+                className="flex-1 bg-surface-hover border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-primary"
+                placeholder="继续提问..."
+              />
+              <button
+                onClick={handleSendPersonaChat}
+                className="px-4 py-2 bg-primary text-black rounded-lg font-bold text-sm hover:bg-primary/90 flex items-center gap-2"
+              >
+                <Send size={14} />
+                发送
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="p-10 max-w-7xl mx-auto min-h-screen">
         <button
-          onClick={() => setSelectedPersonaId(null)}
+          onClick={() => {
+            setSelectedPersonaId(null);
+            setIsPersonaChatOpen(false);
+            setPersonaChatMessages([]);
+            setPersonaChatInput('');
+          }}
           className="mb-6 px-4 py-2 bg-surface hover:bg-surface-hover rounded text-sm flex items-center gap-2 text-white"
         >
           <ArrowLeft size={16} />
           返回人设列表
         </button>
         <div className="bg-surface rounded-xl p-8 mb-6">
-          <h1 className="text-3xl font-extrabold text-white mb-2">{selectedPersona.name} - 人设详情</h1>
-          <p className="text-sm text-gray-400">{selectedPersona.category}</p>
+          <h1 className="text-3xl font-extrabold text-white mb-2">{getPersonaAlias(selectedPersona)} - 人设详情</h1>
+          <div className="mt-2">
+            <span className={`inline-flex items-center px-2.5 py-1 rounded-full border text-xs font-bold ${provenanceBadgeClass[selectedPersona.provenance]}`}>
+              信源：{provenanceLabel[selectedPersona.provenance]}
+            </span>
+          </div>
         </div>
         <div className="grid grid-cols-12 gap-6">
           <div className="col-span-4 bg-surface rounded-xl p-6">
@@ -271,8 +498,58 @@ export default function PersonaLibrary() {
             <div className="p-4 bg-surface-hover border-l-2 border-primary text-sm text-gray-300 leading-relaxed">
               "{selectedPersona.voc}"
             </div>
+            <div className="mt-4">
+              <h4 className="text-sm font-bold text-white mb-2">VOC 精炼关键词</h4>
+              {vocKeywords.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {vocKeywords.map((kw) => (
+                    <span key={kw} className="px-3 py-1 bg-surface-hover rounded text-xs text-gray-200 border border-white/10">
+                      {kw}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-xs text-gray-500">暂无可提取关键词</div>
+              )}
+            </div>
           </div>
           <div className="col-span-12 bg-surface rounded-xl p-6">
+            <h3 className="text-lg font-bold text-white mb-4">人设文字信息</h3>
+            <div className="bg-surface-hover rounded-lg border border-white/10 p-5 mb-6 space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <h4 className="text-2xl font-bold text-white">{getPersonaAlias(selectedPersona)}</h4>
+                <button
+                  onClick={() => setIsPersonaChatOpen(true)}
+                  className="px-3 py-2 rounded-lg text-xs font-bold bg-primary text-black hover:bg-primary/90 shrink-0"
+                >
+                  继续对话
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {selectedPersona.tags.map((tag) => (
+                  <span key={tag} className="px-3 py-1 rounded bg-white/5 text-xs text-gray-200 border border-white/10">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+              <div className="space-y-3 text-sm text-gray-200 leading-relaxed">
+                {radarDimensionDetails.map((d) => (
+                  <p key={d.title}>
+                    <span className="font-bold text-white">{d.title}：</span>
+                    {d.desc}
+                  </p>
+                ))}
+              </div>
+              <div>
+                <h5 className="text-sm font-bold text-white mb-2">人设关键信息：</h5>
+                <ul className="list-disc ml-5 space-y-1 text-sm text-gray-200">
+                  {selectedPersona.cdpTags.map((tag) => (
+                    <li key={tag}>{tag}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+
             <h3 className="text-lg font-bold text-white mb-4">七维评分雷达图</h3>
             <div className="h-[420px] min-h-[320px] min-w-0">
               <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={320}>
@@ -305,229 +582,160 @@ export default function PersonaLibrary() {
         </button>
       </div>
 
-      {/* 左右布局：左侧筛选，右侧统计 */}
       <div className="grid grid-cols-12 gap-6 mb-8">
-        {/* 左侧：标签筛选 */}
-        <div className="col-span-5 bg-surface p-6 rounded-xl">
-          <p className="text-white text-lg font-bold mb-6">标签筛选</p>
-
-          {/* 身份与基础属性 */}
-          <div className="mb-6">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-white font-bold text-sm">身份与基础属性</h3>
-              <span className="text-gray-500 text-xs">38</span>
-            </div>
-            <div className="flex flex-wrap gap-2 mb-3">
-              {['年龄段', '职业类型', '收入水平', '教育背景', '家庭结构'].map(tag => (
-                <button
-                  key={tag}
-                  onClick={() => toggleSubTag('身份与基础属性', tag)}
-                  className={`px-3 py-1.5 text-xs rounded transition-colors ${
-                    selectedSubTags.includes(tag)
-                      ? 'bg-primary text-black'
-                      : 'bg-surface-hover text-gray-300 hover:bg-[#353534]'
-                  }`}
-                >
-                  {tag}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 社会与人口统计 */}
-          <div className="mb-6">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-white font-bold text-sm">社会与人口统计</h3>
-              <span className="text-gray-500 text-xs">35</span>
-            </div>
-            <div className="flex flex-wrap gap-2 mb-3">
-              {['城市等级', '居住区域', '婚姻状况', '子女情况', '生活方式'].map(tag => (
-                <button
-                  key={tag}
-                  onClick={() => toggleSubTag('社会与人口统计', tag)}
-                  className={`px-3 py-1.5 text-xs rounded transition-colors ${
-                    selectedSubTags.includes(tag)
-                      ? 'bg-primary text-black'
-                      : 'bg-surface-hover text-gray-300 hover:bg-[#353534]'
-                  }`}
-                >
-                  {tag}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 购车决策与潜客行为 */}
-          <div className="mb-6">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-white font-bold text-sm">购车决策与潜客行为</h3>
-              <span className="text-gray-500 text-xs">30</span>
-            </div>
-            <div className="flex flex-wrap gap-2 mb-3">
-              {['购车动机', '决策周期', '信息渠道', '试驾偏好', '价格敏感度'].map(tag => (
-                <button
-                  key={tag}
-                  onClick={() => toggleSubTag('购车决策与潜客行为', tag)}
-                  className={`px-3 py-1.5 text-xs rounded transition-colors ${
-                    selectedSubTags.includes(tag)
-                      ? 'bg-primary text-black'
-                      : 'bg-surface-hover text-gray-300 hover:bg-[#353534]'
-                  }`}
-                >
-                  {tag}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 车辆使用与售后服务 */}
-          <div className="mb-6">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-white font-bold text-sm">车辆使用与售后服务</h3>
-              <span className="text-gray-500 text-xs">22</span>
-            </div>
-            <div className="flex flex-wrap gap-2 mb-3">
-              {['用车场景', '里程需求', '保养频率', '服务期望', '品牌忠诚度'].map(tag => (
-                <button
-                  key={tag}
-                  onClick={() => toggleSubTag('车辆使用与售后服务', tag)}
-                  className={`px-3 py-1.5 text-xs rounded transition-colors ${
-                    selectedSubTags.includes(tag)
-                      ? 'bg-primary text-black'
-                      : 'bg-surface-hover text-gray-300 hover:bg-[#353534]'
-                  }`}
-                >
-                  {tag}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 数字触点与线上行为 */}
-          <div className="mb-6">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-white font-bold text-sm">数字触点与线上行为</h3>
-              <span className="text-gray-500 text-xs">18</span>
-            </div>
-            <div className="flex flex-wrap gap-2 mb-3">
-              {['社交平台', '内容偏好', '互动频率', '设备使用', '数字素养'].map(tag => (
-                <button
-                  key={tag}
-                  onClick={() => toggleSubTag('数字触点与线上行为', tag)}
-                  className={`px-3 py-1.5 text-xs rounded transition-colors ${
-                    selectedSubTags.includes(tag)
-                      ? 'bg-primary text-black'
-                      : 'bg-surface-hover text-gray-300 hover:bg-[#353534]'
-                  }`}
-                >
-                  {tag}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 品牌认知与情感连接 */}
-          <div className="mb-6">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-white font-bold text-sm">品牌认知与情感连接</h3>
-              <span className="text-gray-500 text-xs">12</span>
-            </div>
-            <div className="flex flex-wrap gap-2 mb-3">
-              {['品牌认知', '情感倾向', '价值观匹配', '推荐意愿', '社群参与'].map(tag => (
-                <button
-                  key={tag}
-                  onClick={() => toggleSubTag('品牌认知与情感连接', tag)}
-                  className={`px-3 py-1.5 text-xs rounded transition-colors ${
-                    selectedSubTags.includes(tag)
-                      ? 'bg-primary text-black'
-                      : 'bg-surface-hover text-gray-300 hover:bg-[#353534]'
-                  }`}
-                >
-                  {tag}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 全部按钮 */}
-          <button
-            onClick={resetFilters}
-            className={`w-full px-4 py-2.5 text-sm font-bold rounded transition-colors ${
-              selectedCategories.length === 0 && selectedSubTags.length === 0
-                ? 'bg-primary text-black'
-                : 'bg-surface-hover text-gray-300 hover:bg-[#353534]'
-            }`}
-          >
-            全部
-          </button>
-        </div>
-
-        {/* 右侧：统计信息 */}
-        <div className="col-span-7 bg-surface rounded-xl p-6">
-          {/* 顶部统计卡片 */}
-          <div className="grid grid-cols-2 gap-6 mb-6">
-            <div>
-              <p className="text-gray-400 text-sm mb-2">人设总数</p>
-              <div className="flex items-baseline gap-2">
-                <h2 className="text-5xl font-extrabold text-white">{filteredPersonas.length}</h2>
-                <span className="text-gray-500 text-sm">已筛选</span>
-              </div>
-            </div>
-            <div>
-              <p className="text-gray-400 text-sm mb-2">已选维度</p>
-              <div className="flex items-baseline gap-2">
-                <h2 className="text-5xl font-extrabold text-white">{selectedDimensions}</h2>
-                <div className="text-gray-500 text-sm max-w-[200px] truncate">
-                  {selectedCategories.length > 0 && selectedCategories.join(', ')}
-                  {selectedSubTags.length > 0 && `, ${selectedSubTags.join(', ')}`}
-                  {selectedDimensions === 0 && '未选择'}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* 各维度人设分布雷达图 */}
-          <div>
-            <p className="text-gray-400 text-sm mb-4">各维度人设分布</p>
-            <div className="h-[420px] min-h-[320px] min-w-0 relative">
-              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={320}>
-                <RadarChart data={dimensionDistribution}>
-                  <PolarGrid stroke="#3b3b3b" />
-                  <PolarAngleAxis
-                    dataKey="subject"
-                    tick={{ fill: '#9ca3af', fontSize: 12 }}
-                  />
-                  <PolarRadiusAxis angle={30} domain={[0, 'auto']} tick={false} axisLine={false} />
-                  <Radar
-                    name="人设数量"
-                    dataKey="count"
-                    stroke="#63fe33"
-                    fill="#63fe33"
-                    fillOpacity={0.3}
-                    label={({ cx, cy, x, y, value }) => {
-                      // 在雷达图的每个顶点显示数量
-                      const offsetX = x > cx ? 15 : -15;
-                      const offsetY = y > cy ? 15 : -15;
-                      return (
-                        <text
-                          x={x + offsetX}
-                          y={y + offsetY}
-                          fill="#63fe33"
-                          fontSize={14}
-                          fontWeight="bold"
-                          textAnchor={x > cx ? 'start' : 'end'}
-                        >
-                          {value}
-                        </text>
+        <div className="col-span-9 flex flex-col gap-4">
+          <div className="bg-surface rounded-xl p-4">
+            <div className="flex items-center gap-3">
+              <span className="text-lg font-bold text-white shrink-0">信源筛选</span>
+              {([
+                { id: 'first' as const, label: '一方' },
+                { id: 'first_third' as const, label: '一方+三方' },
+              ]).map((opt) => {
+                const active = selectedProvenance.includes(opt.id);
+                return (
+                  <button
+                    key={opt.id}
+                    onClick={() => {
+                      setSelectedProvenance((prev) =>
+                        prev.includes(opt.id) ? prev.filter((x) => x !== opt.id) : [...prev, opt.id],
                       );
                     }}
-                  />
-                </RadarChart>
-              </ResponsiveContainer>
+                    className={`px-3 py-1.5 text-xs rounded transition-colors border ${
+                      active
+                        ? 'bg-primary text-black border-primary'
+                        : 'bg-surface-hover text-gray-300 hover:bg-[#353534] border-white/10'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
             </div>
+          </div>
+
+          <div className="bg-surface p-6 rounded-xl">
+            <p className="text-white text-lg font-bold mb-6">标签筛选</p>
+
+          {filterSchema.map((group) => (
+            <div key={group.category} className="mb-6">
+              <h3 className="text-white font-bold text-sm mb-3">{group.category}</h3>
+              <div className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-visible pb-1">
+                {group.fields.map((field) => (
+                  <div key={field.key} className="relative shrink-0">
+                    <button
+                      type="button"
+                      onMouseEnter={(e) => {
+                        keepFloatingOpen();
+                        const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                        const padding = 8;
+                        const font = window.getComputedStyle(e.currentTarget).font || '12px sans-serif';
+                        const measure = document.createElement('canvas').getContext('2d');
+                        if (measure) measure.font = font;
+                        const labels = ['全部', ...(allFieldMap.get(field.key)?.options ?? [])];
+                        const maxTextWidth = Math.max(
+                          ...labels.map((text) => (measure ? measure.measureText(text).width : text.length * 12)),
+                        );
+                        const width = Math.max(rect.width, Math.ceil(maxTextWidth + 44));
+                        const left = Math.max(padding, Math.min(rect.left, window.innerWidth - width - padding));
+                        const top = rect.bottom + 6;
+                        setFloatingStyle({ left, top, width });
+                        setActiveFieldKey(field.key);
+                      }}
+                      onMouseLeave={scheduleCloseFloating}
+                      className={`w-full text-left px-3 py-2 rounded-lg text-xs border transition-colors bg-surface-hover text-gray-200 border-white/10 hover:bg-[#353534] ${
+                        selectedTagValues[field.key] ? 'ring-1 ring-primary/40' : ''
+                      }`}
+                    >
+                      {field.label}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+
+            {/* 全部按钮 */}
+            <button
+              onClick={resetFilters}
+              className={`w-full px-4 py-2.5 text-sm font-bold rounded transition-colors ${
+                Object.keys(selectedTagValues).length === 0 && selectedProvenance.length === 0
+                  ? 'bg-primary text-black'
+                  : 'bg-surface-hover text-gray-300 hover:bg-[#353534]'
+              }`}
+            >
+              全部
+            </button>
+          </div>
+        </div>
+
+        <div className="col-span-3 bg-surface rounded-xl p-6 h-full self-stretch">
+          <p className="text-white text-lg font-bold mb-4">已筛选标签值</p>
+          <div className="mb-2 text-sm text-gray-400">
+            当前命中人设：<span className="text-white font-bold">{filteredPersonas.length}</span>
+          </div>
+          <div className="mb-4 text-sm text-gray-400">
+            当前已选标签：<span className="text-white font-bold">{selectedTagCount}</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {selectedProvenance.map((p) => (
+              <span key={p} className="px-3 py-1 rounded bg-primary/15 text-primary text-xs border border-primary/30">
+                信源：{provenanceLabel[p]}
+              </span>
+            ))}
+            {Object.entries(selectedTagValues).map(([key, value]) => {
+              const field = allFieldMap.get(key);
+              if (!field || !value) return null;
+              return (
+                <span key={key} className="px-3 py-1 rounded bg-surface-hover text-gray-200 text-xs border border-white/10">
+                  {field.label}：{value}
+                </span>
+              );
+            })}
+            {selectedProvenance.length === 0 && Object.keys(selectedTagValues).length === 0 && (
+              <span className="text-xs text-gray-500">暂无筛选条件</span>
+            )}
           </div>
         </div>
       </div>
+
+      {activeFieldKey && (
+        <div
+          ref={floatingDropdownRef}
+          className="fixed z-[120]"
+          style={{ left: floatingStyle.left, top: floatingStyle.top, width: floatingStyle.width }}
+          onMouseEnter={keepFloatingOpen}
+          onMouseLeave={scheduleCloseFloating}
+        >
+          <div className="bg-surface border border-white/10 rounded-lg p-2 shadow-2xl max-h-64 overflow-y-auto">
+            {['全部', ...(allFieldMap.get(activeFieldKey)?.options ?? [])].map((opt) => {
+              const selected = (selectedTagValues[activeFieldKey] ?? '全部') === opt;
+              return (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => {
+                    setSelectedTagValues((prev) => {
+                      if (opt === '全部') {
+                        const next = { ...prev };
+                        delete next[activeFieldKey];
+                        return next;
+                      }
+                      return { ...prev, [activeFieldKey]: opt };
+                    });
+                  }}
+                  className={`w-full text-left px-2 py-1.5 rounded text-xs transition-colors ${
+                    selected
+                      ? 'bg-primary text-black'
+                      : 'text-gray-200 hover:bg-surface-hover'
+                  }`}
+                >
+                  {opt}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-3 gap-6">
         {filteredPersonas.map((p) => (
@@ -536,7 +744,12 @@ export default function PersonaLibrary() {
             onClick={() => setSelectedPersonaId(p.id)}
             className="bg-surface p-6 rounded-xl relative group text-left hover:bg-surface-hover transition-colors"
           >
-            <h3 className="text-2xl font-bold text-white mb-3">{p.name}</h3>
+            <div className="absolute top-4 right-4">
+              <span className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[11px] font-bold ${provenanceBadgeClass[p.provenance]}`}>
+                {provenanceLabel[p.provenance]}
+              </span>
+            </div>
+            <h3 className="text-2xl font-bold text-white mb-3">{getPersonaAlias(p)}</h3>
             <div className="flex gap-2 mb-8">
               <span className="px-2 py-1 bg-blue-500/20 text-blue-400 text-xs rounded">{p.tags[0]}</span>
               <span className="px-2 py-1 bg-surface-hover text-gray-300 text-xs rounded">{p.tags[1]}</span>

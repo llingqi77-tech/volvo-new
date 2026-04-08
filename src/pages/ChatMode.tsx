@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Upload, Bot, User, Send, Mic, CheckCircle2, Download } from 'lucide-react';
+import { Bot, Send, CheckCircle2, Download, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
@@ -11,12 +11,138 @@ type ChatMessage = {
   text: string;
 };
 
+type ChatSession = {
+  id: string;
+  title: string;
+  updatedAt: number;
+  messages: ChatMessage[];
+};
+
 type InterviewStep = {
   id: string;
   question: string;
   options: string[];
   selected?: string;
 };
+
+const CUSTOMER_SESSIONS_KEY = 'volvo.chat.customer.sessions';
+const EXPERT_SESSIONS_KEY = 'volvo.chat.expert.sessions';
+
+function makeSessionTitle(messages: ChatMessage[]) {
+  const firstUser = messages.find((m) => m.role === 'user');
+  if (!firstUser) return '新建对话';
+  return firstUser.text.length > 16 ? `${firstUser.text.slice(0, 16)}...` : firstUser.text;
+}
+
+function formatSessionTime(ts: number) {
+  return new Date(ts).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function readSessions(key: string): ChatSession[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as ChatSession[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeSessions(key: string, sessions: ChatSession[]) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(key, JSON.stringify(sessions));
+}
+
+function getSessionGroupLabel(ts: number) {
+  const now = Date.now();
+  const diffDays = (now - ts) / (1000 * 60 * 60 * 24);
+  if (diffDays < 1) return '今天';
+  if (diffDays <= 7) return '7 天内';
+  if (diffDays <= 30) return '30 天内';
+  return '更早';
+}
+
+function HistorySidebar({
+  sessions,
+  activeSessionId,
+  onSelectSession,
+  onHide,
+  onNewSession,
+}: {
+  sessions: ChatSession[];
+  activeSessionId: string | null;
+  onSelectSession: (session: ChatSession) => void;
+  onHide: () => void;
+  onNewSession: () => void;
+}) {
+  const groupedSessions = sessions.reduce<Record<string, ChatSession[]>>((acc, session) => {
+    const label = getSessionGroupLabel(session.updatedAt);
+    if (!acc[label]) acc[label] = [];
+    acc[label].push(session);
+    return acc;
+  }, {});
+  const orderedGroups = ['今天', '7 天内', '30 天内', '更早'].filter((label) => groupedSessions[label]?.length);
+
+  return (
+    <div className="w-80 bg-surface border-r border-white/10 p-6 overflow-y-auto">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-sm text-white font-bold">历史对话</p>
+        <button
+          type="button"
+          onClick={onHide}
+          className="w-7 h-7 rounded bg-surface-hover text-gray-400 hover:text-white flex items-center justify-center"
+          title="隐藏历史对话"
+        >
+          <PanelLeftClose size={14} />
+        </button>
+      </div>
+      <button
+        type="button"
+        onClick={onNewSession}
+        className="w-full rounded-full bg-surface-hover border border-white/10 text-white text-sm py-3 mb-5 hover:bg-white/10 transition-colors"
+      >
+        + 开启新对话
+      </button>
+      {sessions.length === 0 ? (
+        <div className="text-xs text-gray-500">暂无历史对话</div>
+      ) : (
+        <div className="space-y-5">
+          {orderedGroups.map((groupLabel) => (
+            <div key={groupLabel}>
+              <p className="text-xs text-gray-500 mb-2">{groupLabel}</p>
+              <div className="space-y-2">
+                {groupedSessions[groupLabel].map((session) => (
+                  <button
+                    type="button"
+                    key={session.id}
+                    onClick={() => onSelectSession(session)}
+                    className={`w-full text-left rounded-lg border px-3 py-2 transition-colors ${
+                      activeSessionId === session.id
+                        ? 'border-primary/60 bg-primary/10'
+                        : 'border-white/10 bg-surface-hover hover:bg-white/10'
+                    }`}
+                  >
+                    <p className="text-sm text-white truncate">{session.title}</p>
+                    <p className="text-[11px] text-gray-500 mt-1">
+                      {formatSessionTime(session.updatedAt)} · {session.messages.length} 条
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function ChatMode() {
   const [chatType, setChatType] = useState<'expert' | 'customer'>('customer');
@@ -45,24 +171,28 @@ export default function ChatMode() {
 
 function CustomerChat() {
   const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    const sessions = readSessions(CUSTOMER_SESSIONS_KEY);
+    return sessions[0]?.messages ?? [];
+  });
+  const [sessions, setSessions] = useState<ChatSession[]>(() => readSessions(CUSTOMER_SESSIONS_KEY));
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(() => readSessions(CUSTOMER_SESSIONS_KEY)[0]?.id ?? null);
   const [hasStarted, setHasStarted] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isPanelVisible, setIsPanelVisible] = useState(true);
+  const [isHistoryVisible, setIsHistoryVisible] = useState(true);
+  const [openFilterMenu, setOpenFilterMenu] = useState<null | 'source' | 'time'>(null);
+  const filterMenuRef = useRef<HTMLDivElement | null>(null);
+  const activeSessionIdRef = useRef<string | null>(activeSessionId);
+  const messagesRef = useRef<ChatMessage[]>(messages);
   const [selectedFilters, setSelectedFilters] = useState({
-    sentiment: [] as string[],
-    category: [] as string[],
-    source: [] as string[],
+    source: null as null | 'firstParty' | 'firstPlusThirdParty',
     timeRange: 'all' as string
   });
 
-  // 模拟VOC数据统计 - 按来源分布
+  // 模拟VOC数据统计 - 按信源分布
   const vocDataBySource = {
-    '问卷系统': 342,
-    '客服工单': 289,
-    '评价中心': 256,
-    '语音系统': 198,
-    '舆情系统': 162
+    firstParty: 789,
+    firstPlusThirdParty: 1247,
   };
 
   const BASE_TOTAL = 1247;
@@ -72,14 +202,11 @@ function CustomerChat() {
     '负面': Math.round(BASE_TOTAL * 0.117)
   };
 
-  // 计算筛选后的VOC统计数据（情感、来源、时间正确联动）
+  // 计算筛选后的VOC统计数据（来源、时间联动）
   const vocStats = useMemo(() => {
-    // 1. 按来源筛选确定基数
     let sourceTotal = BASE_TOTAL;
-    if (selectedFilters.source.length > 0) {
-      sourceTotal = selectedFilters.source.reduce((sum, source) => {
-        return sum + (vocDataBySource[source as keyof typeof vocDataBySource] || 0);
-      }, 0);
+    if (selectedFilters.source) {
+      sourceTotal = vocDataBySource[selectedFilters.source];
     }
     const sourceRatio = sourceTotal / BASE_TOTAL;
 
@@ -92,17 +219,11 @@ function CustomerChat() {
     };
     const timeRatio = timeRatios[selectedFilters.timeRange] || 1.0;
 
-    // 3. 计算各情感在来源+时间筛选后的数量
+    // 保留情感统计展示，但不提供情感筛选交互
     const positive = Math.round(sentimentBase['正面'] * sourceRatio * timeRatio);
     const neutral = Math.round(sentimentBase['中性'] * sourceRatio * timeRatio);
     const negative = Math.round(sentimentBase['负面'] * sourceRatio * timeRatio);
-
-    // 4. 按情感倾向筛选：未选中的置为0（全不选视为全选）
-    const finalPositive = selectedFilters.sentiment.length === 0 || selectedFilters.sentiment.includes('正面') ? positive : 0;
-    const finalNeutral = selectedFilters.sentiment.length === 0 || selectedFilters.sentiment.includes('中性') ? neutral : 0;
-    const finalNegative = selectedFilters.sentiment.length === 0 || selectedFilters.sentiment.includes('负面') ? negative : 0;
-
-    const total = finalPositive + finalNeutral + finalNegative;
+    const total = positive + neutral + negative;
 
     const categories = [
       { name: '智能驾驶', count: Math.round(BASE_TOTAL * 0.339 * sourceRatio * timeRatio) },
@@ -114,18 +235,68 @@ function CustomerChat() {
 
     return {
       total,
-      positive: finalPositive,
-      neutral: finalNeutral,
-      negative: finalNegative,
+      positive,
+      neutral,
+      negative,
       categories
     };
   }, [selectedFilters]);
 
+  useEffect(() => {
+    setHasStarted(messages.length > 0);
+  }, [messages]);
+
+  useEffect(() => {
+    writeSessions(CUSTOMER_SESSIONS_KEY, sessions);
+  }, [sessions]);
+
+  useEffect(() => {
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    const onDocMouseDown = (event: MouseEvent) => {
+      if (!filterMenuRef.current) return;
+      if (!filterMenuRef.current.contains(event.target as Node)) {
+        setOpenFilterMenu(null);
+      }
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, []);
+
+  const upsertSession = (nextMessages: ChatMessage[], fixedSessionId?: string) => {
+    const sessionId = fixedSessionId ?? activeSessionIdRef.current ?? `customer-${Date.now()}`;
+    const nextSession: ChatSession = {
+      id: sessionId,
+      title: makeSessionTitle(nextMessages),
+      updatedAt: Date.now(),
+      messages: nextMessages,
+    };
+    setSessions((prev) => [nextSession, ...prev.filter((s) => s.id !== sessionId)]);
+    setActiveSessionId(sessionId);
+    activeSessionIdRef.current = sessionId;
+  };
+
+  const createNewSession = () => {
+    setActiveSessionId(null);
+    activeSessionIdRef.current = null;
+    setMessages([]);
+    setHasStarted(false);
+  };
+
   const handleSend = () => {
     const question = input.trim();
     if (!question) return;
-    setHasStarted(true);
-    setMessages((prev) => [...prev, { id: `voc-u-${Date.now()}`, role: 'user', text: question }]);
+    const sessionIdForTurn = activeSessionIdRef.current ?? `customer-${Date.now()}`;
+    const userMessage: ChatMessage = { id: `voc-u-${Date.now()}`, role: 'user', text: question };
+    const userNextMessages = [...messagesRef.current, userMessage];
+    setMessages(userNextMessages);
+    upsertSession(userNextMessages, sessionIdForTurn);
     setInput('');
 
     // 显示分析过程
@@ -167,154 +338,40 @@ ${sentimentLines || '• 当前筛选条件下暂无情感分布数据'}
 2. 持续优化充电体验和网络布局
 3. 针对续航焦虑提供更透明的数据和解决方案`;
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `voc-a-${Date.now()}`,
-          role: 'assistant',
-          text: response,
-        },
-      ]);
+      const assistantMessage: ChatMessage = {
+        id: `voc-a-${Date.now()}`,
+        role: 'assistant',
+        text: response,
+      };
+      const nextMessages = [...messagesRef.current, assistantMessage];
+      setMessages(nextMessages);
+      upsertSession(nextMessages, sessionIdForTurn);
     }, 2500);
   };
 
   return (
     <div className="flex h-full relative">
-      {/* 左侧：VOC数据面板 - 可隐藏 */}
-      {isPanelVisible && (
-        <div className="w-80 bg-surface border-r border-white/10 flex flex-col">
-          <div className="p-6 border-b border-white/10 flex justify-between items-center">
-            <div>
-              <h3 className="text-lg font-bold text-white mb-2">VOC 数据库</h3>
-              <p className="text-xs text-gray-500">用户之声数据洞察</p>
-            </div>
-            <button
-              onClick={() => setIsPanelVisible(false)}
-              className="w-8 h-8 bg-surface-hover hover:bg-white/10 rounded flex items-center justify-center text-gray-400 hover:text-white transition-colors"
-              title="隐藏面板"
-            >
-              ✕
-            </button>
-          </div>
-
-        {/* 数据统计 */}
-        <div className="p-6 border-b border-white/10">
-          <div className="space-y-4">
-            <div>
-              <p className="text-xs text-gray-500 mb-1">总数据量</p>
-              <p className="text-3xl font-bold text-white">{vocStats.total}</p>
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              <div className="bg-surface-hover rounded p-2">
-                <p className="text-xs text-gray-500">正面</p>
-                <p className="text-lg font-bold text-primary">{vocStats.positive}</p>
-              </div>
-              <div className="bg-surface-hover rounded p-2">
-                <p className="text-xs text-gray-500">中性</p>
-                <p className="text-lg font-bold text-gray-400">{vocStats.neutral}</p>
-              </div>
-              <div className="bg-surface-hover rounded p-2">
-                <p className="text-xs text-gray-500">负面</p>
-                <p className="text-lg font-bold text-red-400">{vocStats.negative}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* 分类统计 */}
-        <div className="p-6 border-b border-white/10">
-          <p className="text-xs text-gray-500 font-bold mb-3">话题分布</p>
-          <div className="space-y-2">
-            {vocStats.categories.map((cat) => (
-              <div key={cat.name} className="flex justify-between items-center">
-                <span className="text-sm text-gray-300">{cat.name}</span>
-                <span className="text-sm font-bold text-white">{cat.count}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* 筛选器 */}
-        <div className="p-6 flex-1 overflow-y-auto">
-          <p className="text-xs text-gray-500 font-bold mb-3">数据筛选</p>
-          <div className="grid grid-cols-2 gap-4">
-            {/* 左列：情感倾向 */}
-            <div>
-              <p className="text-xs text-gray-400 mb-2">情感倾向</p>
-              <div className="space-y-1">
-                {['正面', '中性', '负面'].map((sentiment) => (
-                  <label key={sentiment} className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="rounded bg-surface-hover border-none text-primary focus:ring-0 w-3.5 h-3.5"
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedFilters(prev => ({ ...prev, sentiment: [...prev.sentiment, sentiment] }));
-                        } else {
-                          setSelectedFilters(prev => ({ ...prev, sentiment: prev.sentiment.filter(s => s !== sentiment) }));
-                        }
-                      }}
-                    />
-                    {sentiment}
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            {/* 右列：来源筛选 */}
-            <div>
-              <p className="text-xs text-gray-400 mb-2">数据来源</p>
-              <div className="space-y-1">
-                {Object.keys(vocDataBySource).map((source) => (
-                  <label key={source} className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={selectedFilters.source.includes(source)}
-                      className="rounded bg-surface-hover border-none text-primary focus:ring-0 w-3.5 h-3.5"
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedFilters(prev => ({ ...prev, source: [...prev.source, source] }));
-                        } else {
-                          setSelectedFilters(prev => ({ ...prev, source: prev.source.filter(s => s !== source) }));
-                        }
-                      }}
-                    />
-                    <span>{source}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* 时间范围 - 独立一行 */}
-          <div className="mt-4">
-            <p className="text-xs text-gray-400 mb-2">时间范围</p>
-            <select
-              className="w-full bg-surface-hover border border-white/10 rounded p-2 text-xs text-white outline-none"
-              value={selectedFilters.timeRange}
-              onChange={(e) => setSelectedFilters(prev => ({ ...prev, timeRange: e.target.value }))}
-            >
-              <option value="all">全部时间</option>
-              <option value="week">近一周</option>
-              <option value="month">近一月</option>
-              <option value="quarter">近三月</option>
-            </select>
-          </div>
-        </div>
-      </div>
-      )}
-
-      {/* 展开按钮 - 仅在面板隐藏时显示 */}
-      {!isPanelVisible && (
+      {isHistoryVisible ? (
+        <HistorySidebar
+          sessions={sessions}
+          activeSessionId={activeSessionId}
+          onSelectSession={(session) => {
+            setActiveSessionId(session.id);
+            setMessages(session.messages);
+          }}
+          onHide={() => setIsHistoryVisible(false)}
+          onNewSession={createNewSession}
+        />
+      ) : (
         <button
-          onClick={() => setIsPanelVisible(true)}
-          className="absolute left-0 top-1/2 -translate-y-1/2 bg-primary text-black px-3 py-6 rounded-r-lg font-bold shadow-lg hover:bg-primary/90 transition-all z-10"
+          onClick={() => setIsHistoryVisible(true)}
+          className="absolute left-0 top-1/2 -translate-y-1/2 bg-primary text-black px-2 py-5 rounded-r-lg font-bold shadow-lg hover:bg-primary/90 transition-all z-10"
+          title="展开历史对话"
         >
-          <span className="writing-mode-vertical text-sm">VOC数据库</span>
+          <PanelLeftOpen size={16} />
         </button>
       )}
 
-      {/* 右侧：对话区域 */}
       <div className="flex-1 flex flex-col overflow-hidden p-8">
         <div className="flex-1 overflow-y-auto space-y-6 pr-4">
           {!hasStarted && (
@@ -401,7 +458,6 @@ ${sentimentLines || '• 当前筛选条件下暂无情感分布数据'}
                 </div>
               ))}
 
-              {/* 分析状态 */}
               {isAnalyzing && (
                 <div className="flex gap-4 items-start">
                   <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center shrink-0">
@@ -453,14 +509,90 @@ ${sentimentLines || '• 当前筛选条件下暂无情感分布数据'}
               className="w-full bg-transparent border-none focus:ring-0 text-sm resize-none h-20 mb-2 outline-none"
               placeholder="向 VOC 数据提问，例如：用户对续航的真实反馈是什么？"
             ></textarea>
+            <div className="flex justify-between items-end" ref={filterMenuRef}>
+              <div className="flex items-center gap-2 relative">
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setOpenFilterMenu((prev) => (prev === 'source' ? null : 'source'))}
+                    className="text-xs px-3 py-2 rounded bg-surface border border-white/10 text-gray-300 hover:text-white"
+                  >
+                    数据来源：{selectedFilters.source === 'firstParty' ? '一方' : selectedFilters.source === 'firstPlusThirdParty' ? '一方+三方' : '全部'}
+                  </button>
+                  {openFilterMenu === 'source' && (
+                    <div className="absolute left-0 bottom-full mb-2 w-40 bg-surface border border-white/10 rounded-lg p-1 shadow-xl z-20">
+                      {[
+                        { key: null, label: '全部' },
+                        { key: 'firstParty', label: '一方' },
+                        { key: 'firstPlusThirdParty', label: '一方+三方' },
+                      ].map((source) => (
+                        <button
+                          key={source.label}
+                          type="button"
+                          onClick={() => {
+                            setSelectedFilters((prev) => ({
+                              ...prev,
+                              source: source.key as null | 'firstParty' | 'firstPlusThirdParty',
+                            }));
+                            setOpenFilterMenu(null);
+                          }}
+                          className={`w-full text-left text-xs px-2 py-2 rounded transition-colors ${
+                            selectedFilters.source === source.key ? 'bg-primary/20 text-primary' : 'text-gray-300 hover:bg-white/10'
+                          }`}
+                        >
+                          {source.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setOpenFilterMenu((prev) => (prev === 'time' ? null : 'time'))}
+                    className="text-xs px-3 py-2 rounded bg-surface border border-white/10 text-gray-300 hover:text-white"
+                  >
+                    时间范围：{selectedFilters.timeRange === 'all' ? '全部时间' : selectedFilters.timeRange === 'week' ? '近一周' : selectedFilters.timeRange === 'month' ? '近一月' : '近三月'}
+                  </button>
+                  {openFilterMenu === 'time' && (
+                    <div className="absolute left-0 bottom-full mb-2 w-36 bg-surface border border-white/10 rounded-lg p-1 shadow-xl z-20">
+                      {[
+                        { key: 'all', label: '全部时间' },
+                        { key: 'week', label: '近一周' },
+                        { key: 'month', label: '近一月' },
+                        { key: 'quarter', label: '近三月' },
+                      ].map((time) => (
+                        <button
+                          key={time.key}
+                          type="button"
+                          onClick={() => {
+                            setSelectedFilters((prev) => ({ ...prev, timeRange: time.key }));
+                            setOpenFilterMenu(null);
+                          }}
+                          className={`w-full text-left text-xs px-2 py-2 rounded transition-colors ${
+                            selectedFilters.timeRange === time.key ? 'bg-primary/20 text-primary' : 'text-gray-300 hover:bg-white/10'
+                          }`}
+                        >
+                          {time.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
             <div className="flex justify-end">
               <button onClick={handleSend} className="w-10 h-10 bg-primary text-black rounded-full flex items-center justify-center hover:bg-primary/90">
                 <Send size={18} className="ml-1" />
               </button>
             </div>
+            </div>
           </div>
         </div>
       </div>
+
+      
     </div>
   );
 }
@@ -469,16 +601,63 @@ function ExpertChat() {
   const [input, setInput] = useState('');
   const [filters, setFilters] = useState({ f1: true, f2: true, f3: false });
   const [isOnline, setIsOnline] = useState(true);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    const sessions = readSessions(EXPERT_SESSIONS_KEY);
+    return sessions[0]?.messages ?? [];
+  });
+  const [sessions, setSessions] = useState<ChatSession[]>(() => readSessions(EXPERT_SESSIONS_KEY));
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(() => readSessions(EXPERT_SESSIONS_KEY)[0]?.id ?? null);
   const [hasStarted, setHasStarted] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [thinkingSteps, setThinkingSteps] = useState<string[]>([]);
+  const [isHistoryVisible, setIsHistoryVisible] = useState(true);
+  const activeSessionIdRef = useRef<string | null>(activeSessionId);
+  const messagesRef = useRef<ChatMessage[]>(messages);
+
+  useEffect(() => {
+    setHasStarted(messages.length > 0);
+  }, [messages]);
+
+  useEffect(() => {
+    writeSessions(EXPERT_SESSIONS_KEY, sessions);
+  }, [sessions]);
+
+  useEffect(() => {
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  const upsertSession = (nextMessages: ChatMessage[], fixedSessionId?: string) => {
+    const sessionId = fixedSessionId ?? activeSessionIdRef.current ?? `expert-${Date.now()}`;
+    const nextSession: ChatSession = {
+      id: sessionId,
+      title: makeSessionTitle(nextMessages),
+      updatedAt: Date.now(),
+      messages: nextMessages,
+    };
+    setSessions((prev) => [nextSession, ...prev.filter((s) => s.id !== sessionId)]);
+    setActiveSessionId(sessionId);
+    activeSessionIdRef.current = sessionId;
+  };
+
+  const createNewSession = () => {
+    setActiveSessionId(null);
+    activeSessionIdRef.current = null;
+    setMessages([]);
+    setHasStarted(false);
+  };
 
   const handleSend = () => {
     const question = input.trim();
     if (!question) return;
-    setHasStarted(true);
-    setMessages((prev) => [...prev, { id: `e-u-${Date.now()}`, role: 'user', text: question }]);
+    const sessionIdForTurn = activeSessionIdRef.current ?? `expert-${Date.now()}`;
+    const userMessage: ChatMessage = { id: `e-u-${Date.now()}`, role: 'user', text: question };
+    const userNextMessages = [...messagesRef.current, userMessage];
+    setMessages(userNextMessages);
+    upsertSession(userNextMessages, sessionIdForTurn);
     setInput('');
 
     // 显示思考过程
@@ -540,14 +719,14 @@ function ExpertChat() {
 • 加大充电基础设施投资
 • 强化数字营销和社交媒体传播`;
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `e-a-${Date.now()}`,
-          role: 'assistant',
-          text: response,
-        },
-      ]);
+      const assistantMessage: ChatMessage = {
+        id: `e-a-${Date.now()}`,
+        role: 'assistant',
+        text: response,
+      };
+      const nextMessages = [...messagesRef.current, assistantMessage];
+      setMessages(nextMessages);
+      upsertSession(nextMessages, sessionIdForTurn);
     }, steps.length * 800 + 500);
   };
 
@@ -561,20 +740,31 @@ function ExpertChat() {
     URL.revokeObjectURL(url);
   };
 
-  // 清理Markdown格式，转换为纯文本
-  const cleanMarkdown = (text: string) => {
-    return text
-      .replace(/^#{1,6}\s+/gm, '') // 移除标题符号
-      .replace(/\*\*(.*?)\*\*/g, '$1') // 移除加粗
-      .replace(/\*(.*?)\*/g, '$1') // 移除斜体
-      .replace(/^[-*]\s+/gm, '• ') // 将列表符号统一为圆点
-      .replace(/`(.*?)`/g, '$1') // 移除代码标记
-      .trim();
-  };
-
   return (
-    <div className="flex-1 flex flex-col overflow-hidden p-8">
-      <div className="flex-1 overflow-y-auto space-y-6 pr-4">
+    <div className="flex h-full relative">
+      {isHistoryVisible ? (
+        <HistorySidebar
+          sessions={sessions}
+          activeSessionId={activeSessionId}
+          onSelectSession={(session) => {
+            setActiveSessionId(session.id);
+            setMessages(session.messages);
+          }}
+          onHide={() => setIsHistoryVisible(false)}
+          onNewSession={createNewSession}
+        />
+      ) : (
+        <button
+          onClick={() => setIsHistoryVisible(true)}
+          className="absolute left-0 top-1/2 -translate-y-1/2 bg-primary text-black px-2 py-5 rounded-r-lg font-bold shadow-lg hover:bg-primary/90 transition-all z-10"
+          title="展开历史对话"
+        >
+          <PanelLeftOpen size={16} />
+        </button>
+      )}
+
+      <div className="flex-1 flex flex-col overflow-hidden p-8">
+        <div className="flex-1 overflow-y-auto space-y-6 pr-4">
         {!hasStarted && (
           <div className="h-full min-h-[360px] flex items-center justify-center">
             <div className="max-w-2xl text-center">
@@ -653,50 +843,51 @@ function ExpertChat() {
         )}
       </div>
 
-      <div className="mt-8 max-w-4xl mx-auto w-full">
-        <div className="bg-surface-hover rounded-xl p-4 border-l-2 border-primary shadow-lg">
-          <textarea 
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
-            className="w-full bg-transparent border-none focus:ring-0 text-sm resize-none h-20 mb-2 outline-none" 
-            placeholder="向专家智能体提问，例如：分析下一季度整车供应链风险..."
-          ></textarea>
-          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-3 px-4 py-2 bg-surface rounded border border-white/10">
-                  <span className="text-xs text-gray-300 font-bold">知识范围</span>
-                  <label className="flex items-center gap-2 text-xs text-gray-200 cursor-pointer">
-                    <input type="checkbox" checked={filters.f1} onChange={e => setFilters({...filters, f1: e.target.checked})} className="rounded bg-surface-hover border-none text-primary focus:ring-0 w-3.5 h-3.5" /> 洞察报告
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-gray-200 cursor-pointer">
-                    <input type="checkbox" checked={filters.f2} onChange={e => setFilters({...filters, f2: e.target.checked})} className="rounded bg-surface-hover border-none text-primary focus:ring-0 w-3.5 h-3.5" /> 整车知识
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-gray-200 cursor-pointer">
-                    <input type="checkbox" checked={filters.f3} onChange={e => setFilters({...filters, f3: e.target.checked})} className="rounded bg-surface-hover border-none text-primary focus:ring-0 w-3.5 h-3.5" /> 行业知识
-                  </label>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsOnline((prev) => !prev)}
-                  className="flex items-center gap-3 px-4 py-2 bg-surface rounded border border-white/10"
-                >
-                  <span className="text-xs text-gray-300 font-bold">联网</span>
-                  <div className={`w-8 h-4 rounded-full relative transition-colors ${isOnline ? 'bg-primary' : 'bg-gray-600'}`}>
-                    <div className={`absolute top-0.5 w-3 h-3 bg-black rounded-full transition-all ${isOnline ? 'right-0.5' : 'left-0.5'}`}></div>
+        <div className="mt-8 max-w-4xl mx-auto w-full">
+          <div className="bg-surface-hover rounded-xl p-4 border-l-2 border-primary shadow-lg">
+            <textarea
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              className="w-full bg-transparent border-none focus:ring-0 text-sm resize-none h-20 mb-2 outline-none"
+              placeholder="向专家智能体提问，例如：分析下一季度整车供应链风险..."
+            ></textarea>
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 px-4 py-2 bg-surface rounded border border-white/10">
+                    <span className="text-xs text-gray-300 font-bold">知识范围</span>
+                    <label className="flex items-center gap-2 text-xs text-gray-200 cursor-pointer">
+                      <input type="checkbox" checked={filters.f1} onChange={e => setFilters({...filters, f1: e.target.checked})} className="rounded bg-surface-hover border-none text-primary focus:ring-0 w-3.5 h-3.5" /> 洞察报告
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-gray-200 cursor-pointer">
+                      <input type="checkbox" checked={filters.f2} onChange={e => setFilters({...filters, f2: e.target.checked})} className="rounded bg-surface-hover border-none text-primary focus:ring-0 w-3.5 h-3.5" /> 整车知识
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-gray-200 cursor-pointer">
+                      <input type="checkbox" checked={filters.f3} onChange={e => setFilters({...filters, f3: e.target.checked})} className="rounded bg-surface-hover border-none text-primary focus:ring-0 w-3.5 h-3.5" /> 行业知识
+                    </label>
                   </div>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsOnline((prev) => !prev)}
+                    className="flex items-center gap-3 px-4 py-2 bg-surface rounded border border-white/10"
+                  >
+                    <span className="text-xs text-gray-300 font-bold">联网</span>
+                    <div className={`w-8 h-4 rounded-full relative transition-colors ${isOnline ? 'bg-primary' : 'bg-gray-600'}`}>
+                      <div className={`absolute top-0.5 w-3 h-3 bg-black rounded-full transition-all ${isOnline ? 'right-0.5' : 'left-0.5'}`}></div>
+                    </div>
+                  </button>
+                </div>
               </div>
+              <button onClick={handleSend} className="w-10 h-10 bg-primary text-black rounded-full flex items-center justify-center hover:bg-primary/90">
+                <Send size={18} className="ml-1" />
+              </button>
             </div>
-            <button onClick={handleSend} className="w-10 h-10 bg-primary text-black rounded-full flex items-center justify-center hover:bg-primary/90">
-              <Send size={18} className="ml-1" />
-            </button>
           </div>
         </div>
       </div>

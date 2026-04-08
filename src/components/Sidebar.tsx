@@ -65,7 +65,7 @@ export default function Sidebar({
               title={item.label}
             >
               <Icon size={20} />
-              {!isCollapsed && <span className="text-sm font-semibold tracking-widest">{item.label}</span>}
+              {!isCollapsed && <span className="text-sm font-semibold tracking-normal whitespace-nowrap">{item.label}</span>}
             </button>
           );
         })}

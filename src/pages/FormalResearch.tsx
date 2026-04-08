@@ -10,6 +10,97 @@ const OFFLINE_RESEARCH_CLASSIFICATION = {
   confidence: 'low',
 };
 
+const FULL_TIME_SESSIONS_KEY = 'volvo.chat.expert.sessions';
+const FULL_DOMAIN_SESSIONS_KEY = 'volvo.chat.customer.sessions';
+const RESEARCH_PROJECTS_KEY = 'volvo.research.projects';
+
+type InsightMessage = { id: string; role: 'user' | 'assistant'; text: string };
+type InsightSession = { id: string; title: string; updatedAt: number; messages: InsightMessage[] };
+type SynthesisReportData = {
+  generatedAt: number;
+  fullTimeTopic: string;
+  fullDomainTopic: string;
+  fullTimeConclusion: string;
+  fullDomainConclusion: string;
+  integratedInsights: string[];
+};
+type ResearchProject = {
+  id: string;
+  name: string;
+  fullTimeSessionId: string;
+  fullDomainSessionId: string;
+  synthesisReport: SynthesisReportData | string;
+  updatedAt: number;
+};
+
+function readJsonArray<T>(key: string): T[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeJsonArray<T>(key: string, value: T[]) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(key, JSON.stringify(value));
+}
+
+function formatTime(ts: number) {
+  return new Date(ts).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function buildSynthesisReport(fullTime: InsightSession, fullDomain: InsightSession): SynthesisReportData {
+  const fullTimeConclusion = fullTime.messages.filter((m) => m.role === 'assistant').at(-1)?.text ?? '暂无全时洞察结论';
+  const fullDomainConclusion = fullDomain.messages.filter((m) => m.role === 'assistant').at(-1)?.text ?? '暂无全域洞察结论';
+  return {
+    generatedAt: Date.now(),
+    fullTimeTopic: fullTime.title,
+    fullDomainTopic: fullDomain.title,
+    fullTimeConclusion,
+    fullDomainConclusion,
+    integratedInsights: [
+      '将专家判断与用户反馈交叉验证，形成后续研究的关键假设。',
+      '优先进入分歧点和高影响变量的正式研究验证。',
+    ],
+  };
+}
+
+function normalizeSynthesisReport(report: SynthesisReportData | string): SynthesisReportData {
+  if (typeof report !== 'string') return report;
+  // 兼容旧数据：将 markdown/纯文本兜底到 PDF 结构中展示
+  return {
+    generatedAt: Date.now(),
+    fullTimeTopic: '历史全时洞察',
+    fullDomainTopic: '历史全域洞察',
+    fullTimeConclusion: report,
+    fullDomainConclusion: '历史项目未拆分全域结论，请按新版重新生成可获得结构化报告。',
+    integratedInsights: ['该项目来自旧版数据，建议重新创建项目以生成标准化整合报告。'],
+  };
+}
+
+function synthesisReportToPrompt(projectName: string, report: SynthesisReportData | string) {
+  const normalized = normalizeSynthesisReport(report);
+  return [
+    `项目：${projectName}`,
+    `全时主题：${normalized.fullTimeTopic}`,
+    `全域主题：${normalized.fullDomainTopic}`,
+    '',
+    '全时洞察结论：',
+    normalized.fullTimeConclusion,
+    '',
+    '全域洞察结论：',
+    normalized.fullDomainConclusion,
+    '',
+    '综合判断：',
+    ...normalized.integratedInsights.map((item, idx) => `${idx + 1}. ${item}`),
+  ].join('\n');
+}
+
 function fallbackVerifyQuestion(round: number): {
   id: string;
   mode: 'single';
@@ -43,7 +134,8 @@ function fallbackVerifyQuestion(round: number): {
 }
 
 export default function FormalResearch({ isSidebarCollapsed = false }: { isSidebarCollapsed?: boolean }) {
-  const [step, setStep] = useState(1);
+  const [phase, setPhase] = useState<'gate' | 'flow'>('gate');
+  const [step, setStep] = useState(2);
   const [userInput, setUserInput] = useState('');
   const [classification, setClassification] = useState<{
     kind: string;
@@ -54,6 +146,18 @@ export default function FormalResearch({ isSidebarCollapsed = false }: { isSideb
   const [verificationAnswers, setVerificationAnswers] = useState<Array<{ question: string; answer: string[] }>>([]);
   const [selectedPlanVersion, setSelectedPlanVersion] = useState<any>(null);
 
+  if (phase === 'gate') {
+    return (
+      <ProjectGate
+        onEnterResearch={(project) => {
+          setUserInput(synthesisReportToPrompt(project.name, project.synthesisReport));
+          setStep(2);
+          setPhase('flow');
+        }}
+      />
+    );
+  }
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {step === 1 && <StepStart onNext={(input: string) => { setUserInput(input); setStep(2); }} />}
@@ -61,6 +165,231 @@ export default function FormalResearch({ isSidebarCollapsed = false }: { isSideb
       {step === 3 && <StepAudience onNext={() => setStep(4)} />}
       {step === 4 && <StepConfirm onNext={() => setStep(5)} />}
       {step === 5 && <StepReport />}
+    </div>
+  );
+}
+
+function ProjectGate({ onEnterResearch }: { onEnterResearch: (project: ResearchProject) => void }) {
+  const [projects, setProjects] = useState<ResearchProject[]>(() => readJsonArray<ResearchProject>(RESEARCH_PROJECTS_KEY));
+  const [isCreating, setIsCreating] = useState(false);
+  const [projectName, setProjectName] = useState('');
+  const [selectedFullTimeId, setSelectedFullTimeId] = useState('');
+  const [selectedFullDomainId, setSelectedFullDomainId] = useState('');
+  const [pendingProject, setPendingProject] = useState<ResearchProject | null>(null);
+
+  const fullTimeSessions = readJsonArray<InsightSession>(FULL_TIME_SESSIONS_KEY).filter((s) =>
+    s.messages.some((m) => m.role === 'assistant'),
+  );
+  const fullDomainSessions = readJsonArray<InsightSession>(FULL_DOMAIN_SESSIONS_KEY).filter((s) =>
+    s.messages.some((m) => m.role === 'assistant'),
+  );
+
+  const persistProjects = (next: ResearchProject[]) => {
+    setProjects(next);
+    writeJsonArray(RESEARCH_PROJECTS_KEY, next);
+  };
+
+  const resetCreate = () => {
+    setProjectName('');
+    setSelectedFullTimeId('');
+    setSelectedFullDomainId('');
+    setPendingProject(null);
+    setIsCreating(false);
+  };
+
+  const handleCreate = () => {
+    if (!projectName.trim()) {
+      window.alert('请填写项目名称');
+      return;
+    }
+    if (!selectedFullTimeId || !selectedFullDomainId) {
+      window.alert('必须关联一条全时和一条全域对话记录');
+      return;
+    }
+    const fullTime = fullTimeSessions.find((s) => s.id === selectedFullTimeId);
+    const fullDomain = fullDomainSessions.find((s) => s.id === selectedFullDomainId);
+    if (!fullTime || !fullDomain) {
+      window.alert('关联记录无效，请重新选择');
+      return;
+    }
+    const project: ResearchProject = {
+      id: `project-${Date.now()}`,
+      name: projectName.trim(),
+      fullTimeSessionId: fullTime.id,
+      fullDomainSessionId: fullDomain.id,
+      synthesisReport: buildSynthesisReport(fullTime, fullDomain),
+      updatedAt: Date.now(),
+    };
+    setPendingProject(project);
+  };
+
+  const handleContinueLater = () => {
+    if (!pendingProject) return;
+    persistProjects([pendingProject, ...projects]);
+    resetCreate();
+  };
+
+  const handleEnterNow = () => {
+    if (!pendingProject) return;
+    persistProjects([pendingProject, ...projects]);
+    onEnterResearch(pendingProject);
+    resetCreate();
+  };
+
+  return (
+    <div className="h-full overflow-y-auto p-8">
+      <div className="max-w-6xl mx-auto">
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h2 className="text-3xl font-extrabold text-white mb-2">正式研究</h2>
+            <p className="text-sm text-gray-400">仅包含已关联全时与全域洞察记录的项目可进入正式研究</p>
+          </div>
+          <button
+            onClick={() => setIsCreating(true)}
+            className="bg-primary text-black px-5 py-2.5 rounded-lg text-sm font-bold hover:bg-primary/90"
+          >
+            新建项目
+          </button>
+        </div>
+
+        {projects.length === 0 ? (
+          <div className="bg-surface rounded-xl border border-white/10 p-10 text-center text-gray-400">暂无可进入正式研究的项目，请先新建项目并关联洞察记录。</div>
+        ) : (
+          <div className="grid grid-cols-2 gap-4">
+            {projects.map((p) => (
+              <div key={p.id} className="bg-surface rounded-xl border border-white/10 p-5">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-lg font-bold text-white">{p.name}</h3>
+                  <span className="text-xs text-primary">可进入</span>
+                </div>
+                <p className="text-xs text-gray-500 mb-3">最近更新：{formatTime(p.updatedAt)}</p>
+                <div className="bg-white text-black rounded border border-black/10 p-3 text-xs leading-5 line-clamp-4">
+                  {normalizeSynthesisReport(p.synthesisReport).integratedInsights[0]}
+                </div>
+                <div className="mt-4 flex justify-end">
+                  <button
+                    onClick={() => onEnterResearch(p)}
+                    className="bg-primary text-black px-4 py-2 rounded text-sm font-bold hover:bg-primary/90"
+                  >
+                    进入正式研究
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {isCreating && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-6">
+          <div className="w-full max-w-4xl bg-surface rounded-xl border border-white/10 p-6 max-h-[88vh] overflow-y-auto">
+            {!pendingProject ? (
+              <>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-bold text-white">新建项目</h3>
+                  <button onClick={resetCreate} className="text-gray-400 hover:text-white">✕</button>
+                </div>
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-xs text-gray-400 mb-2">项目名称</p>
+                    <input
+                      value={projectName}
+                      onChange={(e) => setProjectName(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm outline-none"
+                      placeholder="例如：2024 新能源用户决策研究"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-xs text-gray-400 mb-2">关联全时洞察（必选）</p>
+                      <select
+                        value={selectedFullTimeId}
+                        onChange={(e) => setSelectedFullTimeId(e.target.value)}
+                        className="w-full bg-surface text-white border border-white/20 rounded px-3 py-2 text-sm outline-none"
+                      >
+                        <option value="" className="text-black bg-white">请选择全时洞察记录</option>
+                        {fullTimeSessions.map((s) => (
+                          <option key={s.id} value={s.id} className="text-black bg-white">{`${s.title}（${formatTime(s.updatedAt)}）`}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-400 mb-2">关联全域洞察（必选）</p>
+                      <select
+                        value={selectedFullDomainId}
+                        onChange={(e) => setSelectedFullDomainId(e.target.value)}
+                        className="w-full bg-surface text-white border border-white/20 rounded px-3 py-2 text-sm outline-none"
+                      >
+                        <option value="" className="text-black bg-white">请选择全域洞察记录</option>
+                        {fullDomainSessions.map((s) => (
+                          <option key={s.id} value={s.id} className="text-black bg-white">{`${s.title}（${formatTime(s.updatedAt)}）`}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="text-xs text-amber-300 bg-amber-300/10 border border-amber-300/20 rounded px-3 py-2">
+                    必须关联一条全时和一条全域对话记录。
+                  </div>
+                  <div className="flex justify-end gap-3 pt-2">
+                    <button onClick={resetCreate} className="px-4 py-2 text-sm rounded bg-white/5 border border-white/10">取消</button>
+                    <button onClick={handleCreate} className="px-4 py-2 text-sm rounded bg-primary text-black font-bold">生成洞察整合</button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-bold text-white">洞察整合报告</h3>
+                  <button onClick={resetCreate} className="text-gray-400 hover:text-white">✕</button>
+                </div>
+                <PdfStyledSynthesisReport report={pendingProject.synthesisReport} projectName={pendingProject.name} />
+                <div className="mt-5 flex justify-end gap-3">
+                  <button onClick={handleContinueLater} className="px-4 py-2 text-sm rounded bg-white/5 border border-white/10">稍后继续</button>
+                  <button onClick={handleEnterNow} className="px-4 py-2 text-sm rounded bg-primary text-black font-bold">进入正式研究</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PdfStyledSynthesisReport({ report, projectName }: { report: SynthesisReportData | string; projectName: string }) {
+  const normalized = normalizeSynthesisReport(report);
+  return (
+    <div className="bg-white text-black rounded-lg border border-black/10 shadow-xl p-8">
+      <div className="border-b border-black/20 pb-4 mb-5">
+        <h4 className="text-2xl font-extrabold">洞察整合报告</h4>
+        <p className="text-sm text-gray-700 mt-1">项目：{projectName}</p>
+        <p className="text-xs text-gray-500 mt-1">生成时间：{formatTime(normalized.generatedAt)}</p>
+      </div>
+
+      <section className="mb-4">
+        <p className="text-sm font-bold mb-1">一、关联洞察主题</p>
+        <p className="text-sm leading-6">全时洞察：{normalized.fullTimeTopic}</p>
+        <p className="text-sm leading-6">全域洞察：{normalized.fullDomainTopic}</p>
+      </section>
+
+      <section className="mb-4">
+        <p className="text-sm font-bold mb-1">二、全时洞察结论</p>
+        <p className="text-sm leading-6 whitespace-pre-wrap">{normalized.fullTimeConclusion}</p>
+      </section>
+
+      <section className="mb-4">
+        <p className="text-sm font-bold mb-1">三、全域洞察结论</p>
+        <p className="text-sm leading-6 whitespace-pre-wrap">{normalized.fullDomainConclusion}</p>
+      </section>
+
+      <section>
+        <p className="text-sm font-bold mb-1">四、综合判断</p>
+        <ol className="list-decimal pl-5 space-y-1 text-sm">
+          {normalized.integratedInsights.map((item, idx) => (
+            <li key={`${idx}-${item}`}>{item}</li>
+          ))}
+        </ol>
+      </section>
     </div>
   );
 }
