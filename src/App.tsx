@@ -5,11 +5,10 @@
 
 import React, { useState } from 'react';
 import Sidebar from './components/Sidebar';
-import Topbar from './components/Topbar';
 import KnowledgeBase from './pages/KnowledgeBase';
 import PersonaLibrary from './pages/PersonaLibrary';
-import InsightResearch from './pages/InsightResearch';
 import ProfileCenter from './pages/ProfileCenter';
+import ResearchProjects from './pages/ResearchProjects';
 
 export type KnowledgeDoc = {
   id: string;
@@ -101,18 +100,13 @@ export default function App() {
         onLogout={handleLogout}
       />
       <div className="flex-1 flex flex-col relative">
-        <Topbar
-          onOpenProfile={() => setActiveModule('profile-info')}
-          onOpenProject={() => setActiveModule('profile-research')}
-          onLogout={handleLogout}
-        />
         <main className="flex-1 overflow-y-auto">
           {activeModule === 'knowledge' && <KnowledgeBase docs={docs} setDocs={setDocs} />}
           {activeModule === 'persona' && <PersonaLibrary />}
-          {activeModule === 'insight-research' && <InsightResearch isSidebarCollapsed={isSidebarCollapsed} />}
-          {(activeModule === 'profile-info' || activeModule === 'profile-research') && (
-            <ProfileCenter section={activeModule === 'profile-research' ? 'research' : 'info'} />
-          )}
+          {activeModule === 'insight-research' && <ResearchProjects entryMode="insight" />}
+          {activeModule === 'my-projects' && <ResearchProjects entryMode="projects" />}
+          {activeModule === 'profile-info' && <ProfileCenter section="info" />}
+          {activeModule === 'profile-research' && <ResearchProjects entryMode="projects" />}
         </main>
       </div>
     </div>
