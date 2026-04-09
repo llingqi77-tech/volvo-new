@@ -22,6 +22,18 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// 调试日志回传 API（用于前端运行时错误取证）
+app.post('/api/debug-log', (req, res) => {
+  try {
+    const payload = req.body ?? {};
+    console.log('[front-debug]', JSON.stringify(payload));
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('debug-log 接收失败:', error);
+    res.status(500).json({ ok: false });
+  }
+});
+
 // 通用解析 Markdown 响应，提取调研方案和访谈大纲
 const parsePlan = (text: string) => {
   const extractSection = (title: string) => {
