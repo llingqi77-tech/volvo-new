@@ -104,9 +104,8 @@ export default function App() {
           {activeModule === 'knowledge' && <KnowledgeBase docs={docs} setDocs={setDocs} />}
           {activeModule === 'persona' && <PersonaLibrary />}
           {activeModule === 'insight-research' && <ResearchProjects entryMode="insight" />}
-          {activeModule === 'my-projects' && <ResearchProjects entryMode="projects" />}
           {activeModule === 'profile-info' && <ProfileCenter section="info" />}
-          {activeModule === 'profile-research' && <ResearchProjects entryMode="projects" />}
+          {activeModule === 'profile-research' && <ResearchProjects entryMode="insight" />}
         </main>
       </div>
     </div>

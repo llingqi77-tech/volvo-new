@@ -1,9 +1,6 @@
 import { useRef, useState, useEffect } from 'react';
-import { Command, Paperclip, Mic, ArrowRight, Upload, FileText, Share2, Download, User, LayoutGrid, ChevronRight, Play, Send, CheckCircle2 } from 'lucide-react';
-import { PersonaCdpTagFilterPanel } from '../components/PersonaCdpTagFilterPanel';
-import { PersonaDetailView } from '../components/PersonaDetailView';
-import { filterSchema } from '../data/personaFilterSchema';
-import { getPersonaCardTitle, type PersonaProvenance } from '../utils/personaDisplay';
+import { Command, Paperclip, Mic, ArrowRight, Upload, FileText, Share2, Download, User } from 'lucide-react';
+import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer } from 'recharts';
 
 /** 与 API `classify-research` 失败时的 fallback 对齐，用于前端离线降级 */
 const OFFLINE_RESEARCH_CLASSIFICATION = {
@@ -141,14 +138,12 @@ export default function FormalResearch({
   embedded = false,
   initialStep = 2,
   initialInput = '',
-  contextPrefix = '',
   onStepChange,
 }: {
   isSidebarCollapsed?: boolean;
   embedded?: boolean;
   initialStep?: number;
   initialInput?: string;
-  contextPrefix?: string;
   onStepChange?: (step: number) => void;
 }) {
   const [phase, setPhase] = useState<'gate' | 'flow'>(embedded ? 'flow' : 'gate');
@@ -199,18 +194,7 @@ export default function FormalResearch({
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      {step === 1 && (
-        <StepStart
-          onNext={(input: string) => {
-            const topic = input.trim();
-            const mergedInput = contextPrefix
-              ? `${contextPrefix}\n\n【本次调研主题】\n${topic}`
-              : topic;
-            setUserInput(mergedInput);
-            setStep(2);
-          }}
-        />
-      )}
+      {step === 1 && <StepStart onNext={(input: string) => { setUserInput(input); setStep(2); }} />}
       {step === 2 && <StepVerifyAndPlan userInput={userInput} onNext={(cls, answers, version) => { setClassification(cls); setVerificationAnswers(answers); setSelectedPlanVersion(version); setStep(3); }} />}
       {step === 3 && <StepAudience onNext={() => setStep(4)} />}
       {step === 4 && <StepConfirm onNext={() => setStep(5)} />}
@@ -556,7 +540,7 @@ function StepVerifyAndPlan({ userInput, onNext }: { userInput: string; onNext: (
   const [refineAnswers, setRefineAnswers] = useState<Record<string, string[]>>({});
   const [refineCurrentIndex, setRefineCurrentIndex] = useState(0);
 
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const chatBottomRef = useRef<HTMLDivElement>(null);
 
   const fetchWithTimeout = async (url: string, options: Record<string, any> = {}, timeout = 60000) => {
     const controller = new AbortController();
@@ -571,24 +555,8 @@ function StepVerifyAndPlan({ userInput, onNext }: { userInput: string; onNext: (
   };
 
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    requestAnimationFrame(() => {
-      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-    });
-  }, [
-    currentIndex,
-    questions.length,
-    isThinking,
-    thinkingSteps.length,
-    refineMode,
-    refineCurrentIndex,
-    refineQuestions.length,
-    versions.length,
-    selectedVersionIndex,
-    isClassifying,
-    currentIndex >= 5,
-  ]);
+    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [currentIndex, isThinking, thinkingSteps, refineMode, refineCurrentIndex]);
 
   const simulateThinkingProcess = (roundNumber: number) => {
     const thinkingProcesses = [
@@ -806,10 +774,6 @@ ${interviewGuide.map((s) => `## ${s.title}\n- ${s.questions.join('\n- ')}`).join
 
   const handleRefineSubmit = async () => {
     if (!refineInput.trim()) return;
-    if (versions.length === 0) {
-      window.alert('请先在「调研方案 / 访谈大纲」卡片中生成 1.0 版内容后再提出修改诉求。');
-      return;
-    }
     setRefineMode('questioning');
 
     // 追问问题：离线模拟固定 3 题（不请求 /api/generate-refine-questions）
@@ -971,9 +935,8 @@ ${interviewGuide.map((s: any) => `## ${s.title}\n- ${(s.questions || []).join('\
 
   return (
     <div className="flex-1 flex overflow-hidden">
-      <div className="flex-1 flex flex-col min-w-0 min-h-0 border-r border-white/10">
-        <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto p-12">
-          <div className="max-w-3xl mx-auto space-y-6">
+      <div className="flex-1 overflow-y-auto p-12 border-r border-white/10">
+        <div className="max-w-3xl mx-auto space-y-6">
           {questions.slice(0, currentIndex).map((q, idx) => (
             <div key={q.id} className="space-y-3">
               <div className="text-xs text-primary font-bold">问题 {idx + 1}</div>
@@ -1035,8 +998,36 @@ ${interviewGuide.map((s: any) => `## ${s.title}\n- ${(s.questions || []).join('\
             </div>
           )}
 
+          <div ref={chatBottomRef}></div>
+
           {isDone && !isThinking && (
             <>
+              <div className="bg-surface p-6 rounded-xl border border-white/10">
+                <div className="text-sm font-bold mb-2">动态核验已完成</div>
+                <div className="text-xs text-gray-400 mb-4">5/5 题已确认，系统已生成初步方案</div>
+                <div className="text-xs text-gray-500 mb-4">点击下方卡片查看详细内容</div>
+                <div className="grid grid-cols-2 gap-3">
+                  <button onClick={() => handleGenerateArtifact('plan')} className={`p-4 rounded-lg border-2 transition-all text-left ${selectedArtifact === 'plan' ? 'border-primary bg-primary/10' : 'border-white/10 hover:border-white/20 bg-surface-hover'}`}>
+                    <div className="flex items-center gap-2 mb-2"><FileText size={18} className="text-primary" /><span className="text-sm font-bold text-white">调研方案</span></div>
+                    <p className="text-xs text-gray-400">研究背景、方法论、执行计划</p>
+                  </button>
+                  <button onClick={() => handleGenerateArtifact('interview')} className={`p-4 rounded-lg border-2 transition-all text-left ${selectedArtifact === 'interview' ? 'border-primary bg-primary/10' : 'border-white/10 hover:border-white/20 bg-surface-hover'}`}>
+                    <div className="flex items-center gap-2 mb-2"><User size={18} className="text-primary" /><span className="text-sm font-bold text-white">访谈大纲</span></div>
+                    <p className="text-xs text-gray-400">结构化访谈问题设计</p>
+                  </button>
+                </div>
+              </div>
+
+              {versions.length > 0 && refineMode !== 'questioning' && (
+                <div className="bg-surface p-4 rounded-xl border border-white/10">
+                  <div className="text-xs text-gray-400 mb-2">对方案不满意？输入修改需求继续对话</div>
+                  <div className="flex gap-2">
+                    <input value={refineInput} onChange={(e) => setRefineInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleRefineSubmit()} placeholder="例如：希望增加竞争对手分析、样本量扩大到50人..." className="flex-1 bg-black/30 border border-white/10 rounded px-3 py-2 text-sm text-white placeholder:text-gray-600 outline-none focus:border-primary" />
+                    <button onClick={handleRefineSubmit} className="bg-primary text-black px-4 py-2 rounded font-bold text-sm hover:bg-primary/90">发送</button>
+                  </div>
+                </div>
+              )}
+
               {refineMode === 'questioning' && (
                 <div className="space-y-6">
                   <div className="text-sm text-gray-300">为了更好地理解您的需求，请回答以下问题：</div>
@@ -1078,117 +1069,12 @@ ${interviewGuide.map((s: any) => `## ${s.title}\n- ${(s.questions || []).join('\
                 </div>
               )}
 
-              <button
-                type="button"
-                onClick={() => {
-                  const answersArray = Object.entries(answers).map(([qId, ans]) => ({
-                    question: questions.find((q) => q.id === qId)?.title ?? '',
-                    answer: ans,
-                  }));
-                  onNext(classification, answersArray, activeVersion);
-                }}
-                className="w-full bg-primary text-black px-8 py-3 font-bold flex items-center justify-center gap-2 hover:bg-primary/90 rounded-lg"
-              >
+              <button onClick={() => { const answersArray = Object.entries(answers).map(([qId, ans]) => ({ question: questions.find(q => q.id === qId)?.title ?? '', answer: ans })); onNext(classification, answersArray, activeVersion); }} className="w-full bg-primary text-black px-8 py-3 font-bold flex items-center justify-center gap-2 hover:bg-primary/90 rounded-lg">
                 确认方案，进入下一步 <ArrowRight size={18} />
               </button>
             </>
           )}
-          </div>
         </div>
-
-        {isDone && !isThinking && (
-          <div className="shrink-0 border-t border-white/10 bg-[#0c0c0c] px-8 py-4">
-            <div className="max-w-3xl mx-auto space-y-3">
-              <div className="flex items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-sm text-gray-300">
-                <LayoutGrid className="h-4 w-4 shrink-0 text-gray-400" aria-hidden />
-                <span className="font-semibold text-white">研究产出</span>
-                <ChevronRight className="h-4 w-4 shrink-0 text-gray-500" aria-hidden />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-xl border border-white/10 bg-zinc-200/95 p-4 text-zinc-900 shadow-sm">
-                  <div className="mb-2 flex items-center gap-2">
-                    <CheckCircle2 className="h-5 w-5 text-emerald-700" aria-hidden />
-                    <span className="text-sm font-bold">已澄清您的研究问题</span>
-                  </div>
-                  <p className="text-xs text-zinc-600">5/5 题已完成</p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-zinc-200/95 p-4 text-zinc-900 shadow-sm">
-                  <p className="mb-2 text-sm font-bold">1.0 版调研方案与访谈大纲</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleGenerateArtifact('plan')}
-                      className={`rounded-lg border px-2 py-2 text-left text-xs font-bold transition-colors ${
-                        selectedArtifact === 'plan' ? 'border-emerald-700 bg-emerald-50' : 'border-zinc-300 bg-white hover:bg-zinc-50'
-                      }`}
-                    >
-                      <span className="flex items-center gap-1">
-                        <FileText className="h-3.5 w-3.5" />
-                        调研方案
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleGenerateArtifact('interview')}
-                      className={`rounded-lg border px-2 py-2 text-left text-xs font-bold transition-colors ${
-                        selectedArtifact === 'interview' ? 'border-emerald-700 bg-emerald-50' : 'border-zinc-300 bg-white hover:bg-zinc-50'
-                      }`}
-                    >
-                      <span className="flex items-center gap-1">
-                        <User className="h-3.5 w-3.5" />
-                        访谈大纲
-                      </span>
-                    </button>
-                  </div>
-                  <p className="mt-2 text-[11px] text-zinc-600">
-                    {versions.length === 0
-                      ? '点击上方按钮生成，生成后可在右侧查看全文'
-                      : `已生成 v${versions[versions.length - 1]?.version ?? 1}.0，可在右侧切换版本`}
-                  </p>
-                </div>
-              </div>
-
-              {refineMode === 'idle' && (
-                <div className="rounded-xl border border-white/10 bg-surface p-4">
-                  <textarea
-                    value={refineInput}
-                    onChange={(e) => setRefineInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        handleRefineSubmit();
-                      }
-                    }}
-                    rows={3}
-                    placeholder="对当前方案不满意，提出后续问题继续修改"
-                    className="w-full resize-none rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-gray-500 outline-none focus:border-primary"
-                  />
-                  <div className="mt-3 flex items-center justify-between gap-3">
-                    <button
-                      type="button"
-                      onClick={handleRefineSubmit}
-                      disabled={versions.length === 0 || !refineInput.trim()}
-                      className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      <Play className="h-4 w-4 fill-current" aria-hidden />
-                      继续
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleRefineSubmit}
-                      disabled={versions.length === 0 || !refineInput.trim()}
-                      title="发送修改诉求"
-                      className="flex h-11 w-11 items-center justify-center rounded-full bg-primary text-black shadow-lg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      <Send className="h-5 w-5" aria-hidden />
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
       </div>
 
       {isDone && isPanelVisible && (
@@ -1869,18 +1755,6 @@ function StepThreeColumn({
 }
 
 function StepAudience({ onNext }: { onNext: () => void }) {
-  const emitDebug = (payload: Record<string, unknown>) => {
-    fetch('/api/debug-log', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    }).catch(() => {});
-  };
-
-  const cdpFieldLabelMap = new Map(
-    filterSchema.flatMap((g) => g.fields.map((f) => [f.key, f.label] as const)),
-  );
-
   const [profiles, setProfiles] = useState([
     { id: 'c1', name: '理性先锋型', tags: ['高净值', '智驾优先', '效率导向'], users: 128, voc: 542 },
     { id: 'c2', name: '家庭安全型', tags: ['家庭用户', '空间诉求', '安全敏感'], users: 106, voc: 497 },
@@ -1889,253 +1763,73 @@ function StepAudience({ onNext }: { onNext: () => void }) {
     { id: 'c5', name: '品牌认同型', tags: ['品牌价值', '长期主义', '口碑驱动'], users: 102, voc: 468 },
   ]);
   const [selectedProfileId, setSelectedProfileId] = useState('c1');
-  const [personas, setPersonas] = useState<
-    Array<{
-      id: string;
-      profileId: string;
-      cardTitle: string;
-      name: string;
-      tags: string[];
-      score: number;
-      conf: number;
-      category: string;
-      subCategory: string;
-      cdpTags: string[];
-      voc: string;
-      radar: number[];
-      provenance: PersonaProvenance;
-    }>
-  >([
-    { id: 'p1', profileId: 'c1', cardTitle: '极客小远', name: '陈思远', tags: ['科技极客', '高净值'], score: 8.8, conf: 93, category: '身份与基础属性', subCategory: '职业类型', cdpTags: ['智驾优先', '高净值', '效率导向'], voc: '我希望车辆主动发现风险并接管平顺。', radar: [82, 90, 84, 76, 92, 95, 70], provenance: 'first' },
-    { id: 'p2', profileId: 'c1', cardTitle: '精致小林', name: '林沐然', tags: ['精致生活家', '安全控'], score: 9.1, conf: 95, category: '社会与人口统计', subCategory: '生活方式', cdpTags: ['家庭用户', '安全敏感', '材质关注'], voc: '环保材料不是口号，体验和质感必须同时在线。', radar: [80, 86, 88, 74, 94, 83, 79], provenance: 'third' },
-    { id: 'p2-1', profileId: 'c2', cardTitle: '奶爸小周', name: '周祺', tags: ['家庭安全', '空间导向'], score: 8.7, conf: 92, category: '社会与人口统计', subCategory: '家庭结构', cdpTags: ['家庭用户', '空间诉求', '安全敏感'], voc: '后排空间和主动安全是我购车决策第一优先级。', radar: [84, 81, 78, 73, 93, 79, 88], provenance: 'first' },
-    { id: 'p3-1', profileId: 'c3', cardTitle: '极简悠然', name: '许悠然', tags: ['环保主义', '极简'], score: 8.9, conf: 91, category: '购车决策与潜客行为', subCategory: '购车动机', cdpTags: ['可持续偏好', '极简审美', '材质敏感'], voc: '我希望环保材料不仅环保，还要有高级触感和设计统一性。', radar: [79, 85, 90, 72, 89, 82, 76], provenance: 'deep_interview' },
-    { id: 'p3', profileId: 'c4', cardTitle: 'Z代小张', name: '张逸豪', tags: ['都市先锋', 'Z世代'], score: 9.3, conf: 96, category: '数字触点与线上行为', subCategory: '信息渠道', cdpTags: ['数字原生', '尝鲜驱动', '社媒活跃'], voc: '我会先看真实测评，再决定是否愿意信任品牌叙事。', radar: [76, 95, 87, 90, 82, 97, 74], provenance: 'third' },
-    { id: 'p5-1', profileId: 'c5', cardTitle: '口碑小宋', name: '宋致远', tags: ['长期主义', '品牌认同'], score: 8.6, conf: 90, category: '品牌认知与情感连接', subCategory: '购车动机', cdpTags: ['品牌价值', '长期主义', '口碑驱动'], voc: '我更看重品牌长期信誉和真实用户口碑，而非短期营销话术。', radar: [81, 83, 77, 75, 85, 78, 91], provenance: 'first' },
+  const [personas, setPersonas] = useState([
+    { id: 'p1', profileId: 'c1', name: '陈思远', tags: ['科技极客', '高净值'], score: 8.8, conf: 93, cdpTags: ['智驾优先', '高净值', '效率导向'], voc: '我希望车辆主动发现风险并接管平顺。', radar: [82, 90, 84, 76, 92, 95, 70] },
+    { id: 'p2', profileId: 'c1', name: '林沐然', tags: ['精致生活家', '安全控'], score: 9.1, conf: 95, cdpTags: ['家庭用户', '安全敏感', '材质关注'], voc: '环保材料不是口号，体验和质感必须同时在线。', radar: [80, 86, 88, 74, 94, 83, 79] },
+    { id: 'p2-1', profileId: 'c2', name: '周祺', tags: ['家庭安全', '空间导向'], score: 8.7, conf: 92, cdpTags: ['家庭用户', '空间诉求', '安全敏感'], voc: '后排空间和主动安全是我购车决策第一优先级。', radar: [84, 81, 78, 73, 93, 79, 88] },
+    { id: 'p3-1', profileId: 'c3', name: '许悠然', tags: ['环保主义', '极简'], score: 8.9, conf: 91, cdpTags: ['可持续偏好', '极简审美', '材质敏感'], voc: '我希望环保材料不仅环保，还要有高级触感和设计统一性。', radar: [79, 85, 90, 72, 89, 82, 76] },
+    { id: 'p3', profileId: 'c4', name: '张逸豪', tags: ['都市先锋', 'Z世代'], score: 9.3, conf: 96, cdpTags: ['数字原生', '尝鲜驱动', '社媒活跃'], voc: '我会先看真实测评，再决定是否愿意信任品牌叙事。', radar: [76, 95, 87, 90, 82, 97, 74] },
+    { id: 'p5-1', profileId: 'c5', name: '宋致远', tags: ['长期主义', '品牌认同'], score: 8.6, conf: 90, cdpTags: ['品牌价值', '长期主义', '口碑驱动'], voc: '我更看重品牌长期信誉和真实用户口碑，而非短期营销话术。', radar: [81, 83, 77, 75, 85, 78, 91] },
   ]);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingProfile, setEditingProfile] = useState<typeof profiles[0] | null>(null);
-  const [cdpModalTagValues, setCdpModalTagValues] = useState<Record<string, string>>({});
+  const [selectedPrimaryTag, setSelectedPrimaryTag] = useState<string | null>(null);
+  const [selectedSecondaryTags, setSelectedSecondaryTags] = useState<string[]>([]);
+
+  // CDP标签库定义（参考人设库管理）
+  const primaryTags = ['身份与基础属性', '社会与人口统计', '购车决策与潜客行为', '车辆使用与售后服务', '数字触点与线上行为', '品牌认知与情感连接'];
+
+  const secondaryTags: Record<string, string[]> = {
+    '身份与基础属性': ['年龄段', '职业类型', '收入水平', '教育背景', '家庭结构'],
+    '社会与人口统计': ['城市等级', '居住区域', '婚姻状况', '子女情况', '生活方式'],
+    '购车决策与潜客行为': ['购车动机', '决策周期', '信息渠道', '试驾偏好', '价格敏感度'],
+    '车辆使用与售后服务': ['用车场景', '里程需求', '保养频率', '服务期望', '品牌忠诚度'],
+    '数字触点与线上行为': ['社交平台', '内容偏好', '互动频率', '设备使用', '数字素养'],
+    '品牌认知与情感连接': ['品牌认知', '情感倾向', '价值观匹配', '推荐意愿', '社群参与']
+  };
 
   const selectedPersona = personas.find((p) => p.id === selectedPersonaId) ?? null;
   const filteredPersonas = personas.filter((p) => p.profileId === selectedProfileId || p.profileId === 'all');
 
-  const personaTagPillClass = 'px-2 py-1 bg-blue-500/20 text-blue-400 text-xs rounded';
+  // 如果历史生成的人设 name 里包含“xxxx型”（如“理性先锋型A/B”），则按 profileId 映射回默认姓名，避免在卡片标题中展示“xxxx型”。
+  const defaultPersonaNamesByProfileId: Record<string, string[]> = {
+    c1: ['陈思远', '林沐然'],
+    c2: ['周祺'],
+    c3: ['许悠然'],
+    c4: ['张逸豪'],
+    c5: ['宋致远'],
+  };
 
-  // #region agent log
-  useEffect(() => {
-    const onWindowError = (event: ErrorEvent) => {
-      console.error('[agent-debug][H4] window error captured in StepAudience', {
-        message: event.message,
-        filename: event.filename,
-        lineno: event.lineno,
-        colno: event.colno,
-        error: event.error ? String(event.error) : null,
-      });
-      emitDebug({
-        sessionId: 'af6d99',
-        runId: 'pre-fix',
-        hypothesisId: 'H4',
-        location: 'FormalResearch.tsx:StepAudience:windowError',
-        message: 'window error captured',
-        data: {
-          message: event.message,
-          filename: event.filename,
-          lineno: event.lineno,
-          colno: event.colno,
-          error: event.error ? String(event.error) : null,
-        },
-        timestamp: Date.now(),
-      });
-      fetch('http://127.0.0.1:7288/ingest/dbdc2c33-75d3-416a-ae77-97ee35b38cbf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'af6d99' },
-        body: JSON.stringify({
-          id: `af6d99-h4-window-${Date.now()}`,
-          sessionId: 'af6d99',
-          runId: 'pre-fix',
-          hypothesisId: 'H4',
-          location: 'FormalResearch.tsx:StepAudience:windowError',
-          message: 'window error captured',
-          data: {
-            message: event.message,
-            filename: event.filename,
-            lineno: event.lineno,
-            colno: event.colno,
-            error: event.error ? String(event.error) : null,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-    };
+  const getPersonaDisplayName = (p: any) => {
+    const rawName = p?.name ?? '';
+    const profileId = p?.profileId;
+    if (!rawName) return rawName;
+    if (!rawName.includes('型')) return rawName;
 
-    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
-      console.error('[agent-debug][H4] unhandled rejection captured in StepAudience', {
-        reason: event.reason ? String(event.reason) : null,
-      });
-      emitDebug({
-        sessionId: 'af6d99',
-        runId: 'pre-fix',
-        hypothesisId: 'H4',
-        location: 'FormalResearch.tsx:StepAudience:unhandledRejection',
-        message: 'unhandled rejection captured',
-        data: {
-          reason: event.reason ? String(event.reason) : null,
-        },
-        timestamp: Date.now(),
-      });
-      fetch('http://127.0.0.1:7288/ingest/dbdc2c33-75d3-416a-ae77-97ee35b38cbf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'af6d99' },
-        body: JSON.stringify({
-          id: `af6d99-h4-reject-${Date.now()}`,
-          sessionId: 'af6d99',
-          runId: 'pre-fix',
-          hypothesisId: 'H4',
-          location: 'FormalResearch.tsx:StepAudience:unhandledRejection',
-          message: 'unhandled rejection captured',
-          data: {
-            reason: event.reason ? String(event.reason) : null,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-    };
+    const letter = rawName.endsWith('A') ? 'A' : rawName.endsWith('B') ? 'B' : null;
+    const candidates = defaultPersonaNamesByProfileId[profileId] ?? [];
+    if (!candidates.length) return rawName;
 
-    window.addEventListener('error', onWindowError);
-    window.addEventListener('unhandledrejection', onUnhandledRejection);
-    return () => {
-      window.removeEventListener('error', onWindowError);
-      window.removeEventListener('unhandledrejection', onUnhandledRejection);
-    };
-  }, []);
-  // #endregion
-
-  // #region agent log
-  useEffect(() => {
-    emitDebug({
-      sessionId: 'af6d99',
-      runId: 'pre-fix',
-      hypothesisId: 'H0',
-      location: 'FormalResearch.tsx:StepAudience:mount',
-      message: 'StepAudience mounted',
-      data: { selectedProfileId },
-      timestamp: Date.now(),
-    });
-    fetch('http://127.0.0.1:7288/ingest/dbdc2c33-75d3-416a-ae77-97ee35b38cbf', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'af6d99' },
-      body: JSON.stringify({
-        id: `af6d99-h0-${Date.now()}`,
-        sessionId: 'af6d99',
-        runId: 'pre-fix',
-        hypothesisId: 'H0',
-        location: 'FormalResearch.tsx:StepAudience:mount',
-        message: 'StepAudience mounted',
-        data: { selectedProfileId },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-  }, []);
-  // #endregion
-
-  // #region agent log
-  useEffect(() => {
-    emitDebug({
-      sessionId: 'af6d99',
-      runId: 'pre-fix',
-      hypothesisId: 'H1',
-      location: 'FormalResearch.tsx:StepAudience:selectedPersonaIdEffect',
-      message: 'selectedPersonaId changed',
-      data: {
-        selectedPersonaId,
-        selectedProfileId,
-        filteredPersonaIds: filteredPersonas.map((p) => p.id),
-      },
-      timestamp: Date.now(),
-    });
-    fetch('http://127.0.0.1:7288/ingest/dbdc2c33-75d3-416a-ae77-97ee35b38cbf', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'af6d99' },
-      body: JSON.stringify({
-        id: `af6d99-h1-${Date.now()}`,
-        sessionId: 'af6d99',
-        runId: 'pre-fix',
-        hypothesisId: 'H1',
-        location: 'FormalResearch.tsx:StepAudience:selectedPersonaIdEffect',
-        message: 'selectedPersonaId changed',
-        data: {
-          selectedPersonaId,
-          selectedProfileId,
-          filteredPersonaIds: filteredPersonas.map((p) => p.id),
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-  }, [selectedPersonaId, selectedProfileId, filteredPersonas]);
-  // #endregion
-
-  // #region agent log
-  useEffect(() => {
-    emitDebug({
-      sessionId: 'af6d99',
-      runId: 'pre-fix',
-      hypothesisId: 'H2',
-      location: 'FormalResearch.tsx:StepAudience:selectedPersonaResolved',
-      message: 'selectedPersona resolved snapshot',
-      data: selectedPersona
-        ? {
-            id: selectedPersona.id,
-            hasTags: Array.isArray(selectedPersona.tags),
-            hasRadar: Array.isArray(selectedPersona.radar),
-            radarLength: Array.isArray(selectedPersona.radar) ? selectedPersona.radar.length : -1,
-            hasCdpTags: Array.isArray(selectedPersona.cdpTags),
-            provenance: selectedPersona.provenance,
-          }
-        : { selectedPersonaNull: true },
-      timestamp: Date.now(),
-    });
-    fetch('http://127.0.0.1:7288/ingest/dbdc2c33-75d3-416a-ae77-97ee35b38cbf', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'af6d99' },
-      body: JSON.stringify({
-        id: `af6d99-h2-${Date.now()}`,
-        sessionId: 'af6d99',
-        runId: 'pre-fix',
-        hypothesisId: 'H2',
-        location: 'FormalResearch.tsx:StepAudience:selectedPersonaResolved',
-        message: 'selectedPersona resolved snapshot',
-        data: selectedPersona
-          ? {
-              id: selectedPersona.id,
-              hasTags: Array.isArray(selectedPersona.tags),
-              hasRadar: Array.isArray(selectedPersona.radar),
-              radarLength: Array.isArray(selectedPersona.radar) ? selectedPersona.radar.length : -1,
-              hasCdpTags: Array.isArray(selectedPersona.cdpTags),
-              provenance: selectedPersona.provenance,
-            }
-          : { selectedPersonaNull: true },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-  }, [selectedPersona]);
-  // #endregion
+    if (letter === 'A') return candidates[0] ?? rawName;
+    if (letter === 'B') return candidates[1] ?? candidates[0] ?? rawName;
+    return candidates[0] ?? rawName;
+  };
 
   // 计算筛选后的users和voc数量
   const calculateFilteredCounts = () => {
-    const selectedCount = Object.keys(cdpModalTagValues).length;
-    if (selectedCount === 0) {
+    if (!selectedPrimaryTag && selectedSecondaryTags.length === 0) {
       return editingProfile ? { users: editingProfile.users, voc: editingProfile.voc } : { users: 0, voc: 0 };
     }
 
+    // 模拟筛选逻辑：根据选择的标签减少数量
     const baseUsers = editingProfile?.users ?? 0;
     const baseVoc = editingProfile?.voc ?? 0;
-    const reductionFactor = Math.max(0.35, 0.92 - selectedCount * 0.06);
+    const reductionFactor = 0.7 + (selectedSecondaryTags.length * 0.05); // 每多选一个二级标签，减少5%
 
     return {
       users: Math.floor(baseUsers * reductionFactor),
-      voc: Math.floor(baseVoc * reductionFactor),
+      voc: Math.floor(baseVoc * reductionFactor)
     };
   };
 
@@ -2143,14 +1837,22 @@ function StepAudience({ onNext }: { onNext: () => void }) {
 
   const handleOpenEditModal = (profile: typeof profiles[0]) => {
     setEditingProfile(profile);
-    setCdpModalTagValues({});
+    setSelectedPrimaryTag(null);
+    setSelectedSecondaryTags([]);
     setIsEditModalOpen(true);
   };
 
   const handleCloseEditModal = () => {
     setIsEditModalOpen(false);
     setEditingProfile(null);
-    setCdpModalTagValues({});
+    setSelectedPrimaryTag(null);
+    setSelectedSecondaryTags([]);
+  };
+
+  const handleToggleSecondaryTag = (tag: string) => {
+    setSelectedSecondaryTags(prev =>
+      prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
+    );
   };
 
   const handleApplyFilter = () => {
@@ -2164,6 +1866,18 @@ function StepAudience({ onNext }: { onNext: () => void }) {
     }
     handleCloseEditModal();
   };
+
+  const radarData = selectedPersona
+    ? [
+        { subject: '人口与成长轨迹', A: selectedPersona.radar[0], fullMark: 100 },
+        { subject: '心理动因', A: selectedPersona.radar[1], fullMark: 100 },
+        { subject: '心理特征维度', A: selectedPersona.radar[2], fullMark: 100 },
+        { subject: '行为维度', A: selectedPersona.radar[3], fullMark: 100 },
+        { subject: '需求与痛点', A: selectedPersona.radar[4], fullMark: 100 },
+        { subject: '技术接受度', A: selectedPersona.radar[5], fullMark: 100 },
+        { subject: '社会关系', A: selectedPersona.radar[6], fullMark: 100 },
+      ]
+    : [];
 
   return (
     <div className="flex-1 overflow-y-auto p-10">
@@ -2197,9 +1911,7 @@ function StepAudience({ onNext }: { onNext: () => void }) {
                       </div>
                       <div className="flex flex-wrap gap-2 mb-2">
                         {profile.tags.map((tag) => (
-                          <span key={tag} className={personaTagPillClass}>
-                            {tag}
-                          </span>
+                          <span key={tag} className="px-2 py-1 rounded bg-surface-hover text-xs text-gray-300">{tag}</span>
                         ))}
                       </div>
                       <div className="text-[11px] text-gray-500">{profile.voc}+ VOC</div>
@@ -2222,93 +1934,47 @@ function StepAudience({ onNext }: { onNext: () => void }) {
 
         <div className="col-span-7 space-y-6">
           {selectedPersona ? (
-            <div>
-              <div className="flex justify-end mb-4">
-                <button type="button" onClick={() => setSelectedPersonaId(null)} className="text-xs text-gray-400 hover:text-white">
-                  返回卡片列表
-                </button>
+            <div className="bg-surface p-6 rounded-xl">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-xl font-bold">{getPersonaDisplayName(selectedPersona)} - 详情</h3>
+                <button onClick={() => setSelectedPersonaId(null)} className="text-xs text-gray-400 hover:text-white">返回卡片列表</button>
               </div>
-              <PersonaDetailView persona={selectedPersona} showContinueChat={false} />
+              <div className="mb-4">
+                <div className="text-xs text-gray-500 mb-2">CDP 标签</div>
+                <div className="flex flex-wrap gap-2">
+                  {selectedPersona.cdpTags.map((tag) => (
+                    <span key={tag} className="px-2 py-1 rounded bg-surface-hover text-xs text-primary">{tag}</span>
+                  ))}
+                </div>
+              </div>
+              <div className="mb-4">
+                <div className="text-xs text-gray-500 mb-2">VOC 原始文本</div>
+                <div className="p-3 bg-white/5 border-l-2 border-primary text-sm text-gray-300">{selectedPersona.voc}</div>
+              </div>
+              <div className="h-72">
+                <ResponsiveContainer width="100%" height="100%">
+                  <RadarChart cx="50%" cy="50%" outerRadius="80%" data={radarData}>
+                    <PolarGrid stroke="#2d2935" />
+                    <PolarAngleAxis dataKey="subject" tick={{ fill: '#8a8a8a', fontSize: 10 }} />
+                    <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
+                    <Radar name="Persona" dataKey="A" stroke="#1bff1b" fill="#1bff1b" fillOpacity={0.3} />
+                  </RadarChart>
+                </ResponsiveContainer>
+              </div>
             </div>
           ) : (
             <div className="bg-surface p-6 rounded-xl">
               <h3 className="text-sm font-bold mb-4">模拟生成的人设卡片（可点击查看详情）</h3>
               <div className="grid grid-cols-2 gap-4">
                 {filteredPersonas.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => {
-                      emitDebug({
-                        sessionId: 'af6d99',
-                        runId: 'pre-fix',
-                        hypothesisId: 'H1',
-                        location: 'FormalResearch.tsx:StepAudience:personaCardClick',
-                        message: 'persona card clicked',
-                        data: {
-                          clickedId: p.id,
-                          profileId: p.profileId,
-                          hasTags: Array.isArray(p.tags),
-                          hasRadar: Array.isArray(p.radar),
-                        },
-                        timestamp: Date.now(),
-                      });
-                      // #region agent log
-                      fetch('http://127.0.0.1:7288/ingest/dbdc2c33-75d3-416a-ae77-97ee35b38cbf', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'af6d99' },
-                        body: JSON.stringify({
-                          id: `af6d99-h1-click-${Date.now()}`,
-                          sessionId: 'af6d99',
-                          runId: 'pre-fix',
-                          hypothesisId: 'H1',
-                          location: 'FormalResearch.tsx:StepAudience:personaCardClick',
-                          message: 'persona card clicked',
-                          data: {
-                            clickedId: p.id,
-                            profileId: p.profileId,
-                            hasTags: Array.isArray(p.tags),
-                            hasRadar: Array.isArray(p.radar),
-                          },
-                          timestamp: Date.now(),
-                        }),
-                      }).catch(() => {});
-                      // #endregion
-                      setSelectedPersonaId(p.id);
-                    }}
-                    className="bg-white/5 p-4 rounded text-left hover:bg-white/10 transition-colors"
-                  >
-                    <h4 className="text-2xl font-bold text-white mb-3">{getPersonaCardTitle(p)}</h4>
-                    <div className="flex flex-wrap gap-2 mb-4">
-                      {p.tags.map((tag) => (
-                        <span key={tag} className={personaTagPillClass}>
-                          {tag}
-                        </span>
-                      ))}
+                  <button key={p.id} onClick={() => setSelectedPersonaId(p.id)} className="bg-white/5 p-4 rounded text-left hover:bg-white/10 transition-colors">
+                    <h4 className="text-lg font-bold mb-2">{getPersonaDisplayName(p)}</h4>
+                    <div className="flex gap-2 mb-4">
+                      <span className="px-2 py-1 bg-blue-500/20 text-blue-400 text-xs rounded">{p.tags[0]}</span>
+                      <span className="px-2 py-1 bg-surface-hover text-gray-300 text-xs rounded">{p.tags[1]}</span>
                     </div>
-                    <div className="space-y-3">
-                      <div>
-                        <div className="flex justify-between text-xs text-gray-400 mb-1">
-                          <span>综合评分</span>
-                          <span className="text-white font-bold text-lg">
-                            {p.score.toFixed(1)}{' '}
-                            <span className="text-gray-500 text-xs font-normal">/ 10</span>
-                          </span>
-                        </div>
-                        <div className="h-1.5 bg-surface-hover rounded-full overflow-hidden">
-                          <div className="h-full bg-primary" style={{ width: `${p.score * 10}%` }} />
-                        </div>
-                      </div>
-                      <div>
-                        <div className="flex justify-between text-xs text-gray-400 mb-1">
-                          <span>置信度</span>
-                          <span className="text-white font-bold text-lg">{p.conf}%</span>
-                        </div>
-                        <div className="h-1.5 bg-surface-hover rounded-full overflow-hidden">
-                          <div className="h-full bg-primary" style={{ width: `${p.conf}%` }} />
-                        </div>
-                      </div>
-                    </div>
+                    <div className="text-xs text-gray-400 mb-1">五维评分：<span className="text-white font-bold">{p.score.toFixed(1)}</span></div>
+                    <div className="text-xs text-gray-400">置信度：<span className="text-white font-bold">{p.conf}%</span></div>
                   </button>
                 ))}
               </div>
@@ -2352,19 +2018,75 @@ function StepAudience({ onNext }: { onNext: () => void }) {
                 </div>
               </div>
 
+              {/* CDP标签库 */}
               <div>
                 <h4 className="text-sm font-bold text-primary mb-3">CDP 标签库</h4>
-                <p className="text-xs text-gray-500 mb-2">与人设库一致：悬停一级分类行展开标签池，点选具体取值。</p>
-                <PersonaCdpTagFilterPanel selectedTagValues={cdpModalTagValues} onChange={setCdpModalTagValues} />
+
+                {/* 一级标签 */}
+                <div className="mb-4">
+                  <div className="text-xs text-gray-500 mb-2">一级分类</div>
+                  <div className="flex flex-wrap gap-2">
+                    {primaryTags.map((tag) => {
+                      const isActive = selectedPrimaryTag === tag;
+                      return (
+                        <button
+                          key={tag}
+                          onClick={() => {
+                            setSelectedPrimaryTag(isActive ? null : tag);
+                            setSelectedSecondaryTags([]);
+                          }}
+                          className={`px-3 py-2 rounded text-sm font-medium transition-colors ${
+                            isActive
+                              ? 'bg-primary text-black'
+                              : 'bg-surface-hover text-gray-300 hover:bg-white/10'
+                          }`}
+                        >
+                          {tag}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 二级标签 */}
+                {selectedPrimaryTag && (
+                  <div>
+                    <div className="text-xs text-gray-500 mb-2">二级标签（可多选）</div>
+                    <div className="flex flex-wrap gap-2">
+                      {secondaryTags[selectedPrimaryTag]?.map((tag) => {
+                        const isSelected = selectedSecondaryTags.includes(tag);
+                        return (
+                          <button
+                            key={tag}
+                            onClick={() => handleToggleSecondaryTag(tag)}
+                            className={`px-3 py-2 rounded text-sm transition-colors ${
+                              isSelected
+                                ? 'bg-primary/20 text-primary border border-primary'
+                                : 'bg-surface-hover text-gray-300 hover:bg-white/10 border border-white/10'
+                            }`}
+                          >
+                            {tag}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {Object.keys(cdpModalTagValues).length > 0 && (
+              {/* 已选标签摘要 */}
+              {(selectedPrimaryTag || selectedSecondaryTags.length > 0) && (
                 <div className="bg-white/5 rounded-lg p-4">
                   <div className="text-xs text-gray-500 mb-2">已选标签</div>
-                  <div className="flex flex-wrap gap-2 text-xs text-primary">
-                    {Object.entries(cdpModalTagValues).map(([key, value]) => (
-                      <span key={key} className="px-2 py-1 bg-primary/10 text-primary rounded border border-primary/20">
-                        {cdpFieldLabelMap.get(key) ?? key}：{value}
+                  <div className="flex flex-wrap gap-2">
+                    {selectedPrimaryTag && (
+                      <span className="px-2 py-1 bg-primary/20 text-primary text-xs rounded border border-primary/30">
+                        {selectedPrimaryTag}
+                      </span>
+                    )}
+                    {selectedSecondaryTags.map((tag) => (
+                      <span key={tag} className="px-2 py-1 bg-primary/10 text-primary text-xs rounded">
+                        {tag}
                       </span>
                     ))}
                   </div>

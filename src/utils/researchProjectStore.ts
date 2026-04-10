@@ -1,4 +1,4 @@
-import type { PersonaProvenance } from './personaDisplay';
+export type PersonaProvenance = 'first' | 'third' | 'deep_interview';
 
 export type ProjectStage =
   | 'intentClarify'
@@ -19,11 +19,24 @@ export type ChoiceQuestion = {
   allowMultiple?: boolean;
 };
 
+/** 扩展消息类型：旧数据无 variant 时按纯文本渲染 */
+export type ChatMessageVariant =
+  | 'text'
+  | 'thinking'
+  | 'intent_options'
+  | 'cta_proceed_fulltime'
+  | 'fulltime_form'
+  | 'domain_form'
+  | 'topic_suggestions';
+
 export type ChatMessage = {
   id: string;
   role: 'user' | 'assistant';
   text: string;
   createdAt: number;
+  variant?: ChatMessageVariant;
+  /** variant === intent_options 时对应题目 id */
+  intentQuestionId?: string;
 };
 
 export type ResearchPlan = {
@@ -47,7 +60,7 @@ export type InterviewPersona = {
   voc: string;
   radar: number[];
   provenance: PersonaProvenance;
-  sourcePool: 'cdp' | 'social';
+  sourcePool: 'cdp' | 'cdp_voc' | 'voc';
 };
 
 export type UploadedMaterial = {
@@ -60,10 +73,14 @@ export type UploadedMaterial = {
 export type ResearchProject = {
   id: string;
   title: string;
+  summary: string;
+  archived: boolean;
   createdAt: number;
   updatedAt: number;
   stage: ProjectStage;
   initialPrompt: string;
+  /** 人设前统一对话流（澄清、范围、主题、计划） */
+  prePersonaMessages: ChatMessage[];
   intentClarify: {
     questions: ChoiceQuestion[];
     answers: Record<string, string[]>;
@@ -221,18 +238,59 @@ export function defaultIntentQuestions(prompt: string): ChoiceQuestion[] {
   ];
 }
 
+function initialIntentThinking(preview: string): string {
+  const p = preview.trim() || '（未填写）';
+  return [
+    '正在理解你的研究背景…',
+    `- 已读入问题：「${truncateProjectTitle(p, 40)}」`,
+    '- 识别决策场景与关键歧义点',
+    '- 映射澄清维度：目标、对象、产出预期',
+    '- 准备第一轮单选题',
+  ].join('\n');
+}
+
+function initialPrePersonaMessages(prompt: string, questions: ChoiceQuestion[]): ChatMessage[] {
+  const now = Date.now();
+  const first = questions[0];
+  if (!first) {
+    return [{ id: `ppm-user-${now}`, role: 'user', text: prompt.trim() || '（未填写）', createdAt: now }];
+  }
+  return [
+    { id: `ppm-user-${now}`, role: 'user', text: prompt.trim() || '（未填写）', createdAt: now },
+    {
+      id: `ppm-think-${now + 1}`,
+      role: 'assistant',
+      variant: 'thinking',
+      text: initialIntentThinking(prompt),
+      createdAt: now + 1,
+    },
+    {
+      id: `ppm-q0-${now + 2}`,
+      role: 'assistant',
+      variant: 'intent_options',
+      intentQuestionId: first.id,
+      text: first.title,
+      createdAt: now + 2,
+    },
+  ];
+}
+
 export function createEmptyProject(initialPrompt = ''): ResearchProject {
   const now = Date.now();
   const prompt = initialPrompt.trim();
+  const questions = defaultIntentQuestions(prompt);
   return {
     id: `project-${now}`,
     title: truncateProjectTitle(prompt || '未命名项目') || '未命名项目',
+    summary: truncateProjectTitle(prompt || '待补充研究摘要', 80) || '待补充研究摘要',
+    archived: false,
     createdAt: now,
     updatedAt: now,
     stage: 'intentClarify',
     initialPrompt: prompt,
+    prePersonaMessages: initialPrePersonaMessages(prompt, questions),
     intentClarify: {
-      questions: defaultIntentQuestions(prompt),
+      questions,
       answers: {},
       summary: '',
       completed: false,
@@ -285,83 +343,19 @@ export function createEmptyProject(initialPrompt = ''): ResearchProject {
   };
 }
 
-function normalizeChatMessages(messages?: Array<{ id?: string; role?: 'user' | 'assistant'; text?: string }>): ChatMessage[] {
-  if (!Array.isArray(messages)) return [];
-  return messages
-    .filter((item) => item && typeof item.text === 'string' && (item.role === 'user' || item.role === 'assistant'))
-    .map((item, idx) => ({
-      id: item.id ?? `legacy-msg-${idx}`,
-      role: item.role as 'user' | 'assistant',
-      text: item.text ?? '',
-      createdAt: Date.now() + idx,
-    }));
-}
-
-function reportTextFromLegacy(project: LegacyFormalProject['synthesisReport']) {
-  if (!project) return '';
-  if (typeof project === 'string') return project;
-  return [
-    '洞察整合摘要',
-    '',
-    `全时主题：${project.fullTimeTopic ?? '未记录'}`,
-    `全域主题：${project.fullDomainTopic ?? '未记录'}`,
-    '',
-    '全时结论：',
-    project.fullTimeConclusion ?? '暂无',
-    '',
-    '全域结论：',
-    project.fullDomainConclusion ?? '暂无',
-    '',
-    '综合判断：',
-    ...(project.integratedInsights?.map((item, idx) => `${idx + 1}. ${item}`) ?? ['暂无']),
-  ].join('\n');
-}
-
-function stageFromLegacy(stage?: string): ProjectStage {
-  switch (stage) {
-    case 'persona':
-      return 'persona';
-    case 'report':
-      return 'report';
-    case 'verifyPlan':
-      return 'plan';
-    case 'formalStart':
-    case 'summaryConfirm':
-    case 'insightChat':
-    default:
-      return 'topicExplore';
-  }
-}
-
 function migrateLegacyInsightRun(raw: LegacyInsightRun): ResearchProject {
-  const legacyFullTimeMessages = normalizeChatMessages(raw.insightTracks?.fullTime?.messages);
-  const legacyFullDomainMessages = normalizeChatMessages(raw.insightTracks?.fullDomain?.messages);
-  const legacyMessages = legacyFullTimeMessages.length + legacyFullDomainMessages.length > 0
-    ? [...legacyFullTimeMessages, ...legacyFullDomainMessages]
-    : normalizeChatMessages(raw.chatMessages);
-  const firstPrompt = legacyMessages.find((item) => item.role === 'user')?.text ?? raw.title ?? '';
-  const project = createEmptyProject(firstPrompt);
-  const fullTimeEnabled = raw.fullTimeEnabled ?? true;
-  const fullDomainEnabled = raw.fullDomainEnabled ?? true;
-  const migratedStage = stageFromLegacy(raw.stage);
-  const summaryBlocks = [
-    raw.insightTracks?.fullTime?.report ? `全时洞察摘要：\n${raw.insightTracks.fullTime.report}` : '',
-    raw.insightTracks?.fullDomain?.report ? `全域洞察摘要：\n${raw.insightTracks.fullDomain.report}` : '',
-  ].filter(Boolean);
+  const p = createEmptyProject(raw.title ?? '');
+  const id = raw.id ?? p.id;
   return {
-    ...project,
-    id: raw.id ?? project.id,
-    title: truncateProjectTitle(raw.title ?? firstPrompt ?? '历史洞察项目') || '历史洞察项目',
-    createdAt: raw.updatedAt ?? project.createdAt,
-    updatedAt: raw.updatedAt ?? project.updatedAt,
-    stage: migratedStage,
-    intentClarify: {
-      ...project.intentClarify,
-      summary: '该项目由旧版洞察流程迁移而来，建议检查研究意图与筛选条件后继续。',
-      completed: true,
-    },
+    ...p,
+    id,
+    title: raw.title ?? p.title,
+    summary: truncateProjectTitle(raw.title ?? p.title, 80) || '待补充研究摘要',
+    archived: false,
+    updatedAt: raw.updatedAt ?? p.updatedAt,
+    stage: 'topicExplore',
     fullTimeSource: {
-      mode: fullTimeEnabled ? 'custom' : 'skip',
+      mode: raw.fullTimeEnabled === false ? 'skip' : 'custom',
       knowledgeScopes: {
         insightReport: raw.fullTimeFilters?.knowledgeScopes?.insightReport ?? true,
         vehicleKnowledge: raw.fullTimeFilters?.knowledgeScopes?.vehicleKnowledge ?? true,
@@ -371,101 +365,169 @@ function migrateLegacyInsightRun(raw: LegacyInsightRun): ResearchProject {
       completed: true,
     },
     fullDomainSource: {
-      mode: fullDomainEnabled ? 'custom' : 'skip',
-      source: raw.fullDomainFilters?.source === 'firstParty' ? 'firstParty' : 'firstPlusThirdParty',
+      mode: raw.fullDomainEnabled === false ? 'skip' : 'custom',
+      source:
+        raw.fullDomainFilters?.source === 'firstParty'
+          ? 'firstParty'
+          : raw.fullDomainFilters?.source === 'firstPlusThirdParty'
+            ? 'firstPlusThirdParty'
+            : 'firstPlusThirdParty',
       timeRange: raw.fullDomainFilters?.timeRange ?? 'quarter',
       completed: true,
     },
+    intentClarify: { ...p.intentClarify, completed: true },
     topicExplore: {
-      summary: summaryBlocks.join('\n\n') || '已迁移历史洞察记录，可在此继续确认正式研究主题。',
-      suggestions: [
-        '确认本次最值得深入的研究主题',
-        '把历史洞察整理成正式研究假设',
-        '基于现有洞察锁定访谈优先人群',
-      ],
-      messages: legacyMessages,
-      confirmedTopic: '',
+      ...p.topicExplore,
+      messages: (raw.chatMessages ?? [])
+        .filter((m) => m.text)
+        .map((m, i) => ({
+          id: m.id ?? `m-${i}`,
+          role: m.role ?? 'assistant',
+          text: m.text ?? '',
+          createdAt: p.createdAt + i,
+        })),
     },
+    prePersonaMessages:
+      (raw.chatMessages?.length ?? 0) > 0
+        ? (raw.chatMessages ?? [])
+            .filter((m) => m.text)
+            .map((m, i) => ({
+              id: m.id ?? `m-${i}`,
+              role: m.role ?? 'assistant',
+              text: m.text ?? '',
+              createdAt: p.createdAt + i,
+            }))
+        : p.prePersonaMessages,
   };
 }
 
 function migrateLegacyFormalProject(raw: LegacyFormalProject): ResearchProject {
-  const report = reportTextFromLegacy(raw.synthesisReport);
-  const project = createEmptyProject(raw.name ?? '历史正式研究项目');
+  const p = createEmptyProject(typeof raw.synthesisReport === 'string' ? raw.synthesisReport : raw.name ?? '');
   return {
-    ...project,
-    id: raw.id ?? project.id,
-    title: truncateProjectTitle(raw.name ?? '历史正式研究项目') || '历史正式研究项目',
-    createdAt: raw.updatedAt ?? project.createdAt,
-    updatedAt: raw.updatedAt ?? project.updatedAt,
+    ...p,
+    id: raw.id ?? p.id,
+    title: raw.name ?? p.title,
+    summary: truncateProjectTitle(raw.name ?? p.title, 80) || '待补充研究摘要',
+    archived: false,
+    updatedAt: raw.updatedAt ?? p.updatedAt,
     stage: 'report',
-    intentClarify: {
-      ...project.intentClarify,
-      summary: '该项目由旧版正式研究记录迁移而来。',
-      completed: true,
-    },
-    fullTimeSource: { ...project.fullTimeSource, completed: true },
-    fullDomainSource: { ...project.fullDomainSource, completed: true },
-    topicExplore: {
-      summary: report,
-      suggestions: [],
-      messages: [],
-      confirmedTopic: raw.name ?? '',
-    },
+    intentClarify: { ...p.intentClarify, completed: true },
+    fullTimeSource: { ...p.fullTimeSource, completed: true },
+    fullDomainSource: { ...p.fullDomainSource, completed: true },
     reportStage: {
-      report,
-      generatedAt: raw.updatedAt ?? Date.now(),
+      report: typeof raw.synthesisReport === 'string' ? raw.synthesisReport : JSON.stringify(raw.synthesisReport ?? {}),
+      generatedAt: Date.now(),
     },
   };
 }
 
 function readLegacyProjects(): ResearchProject[] {
-  if (typeof window === 'undefined') return [];
   const projects: ResearchProject[] = [];
   try {
-    const insightRaw = window.localStorage.getItem(LEGACY_INSIGHT_RUNS_KEY);
+    const insightRaw = localStorage.getItem(LEGACY_INSIGHT_RUNS_KEY);
     if (insightRaw) {
       const parsed = JSON.parse(insightRaw) as LegacyInsightRun[];
       if (Array.isArray(parsed)) {
-        projects.push(...parsed.map((item) => migrateLegacyInsightRun(item)));
+        projects.push(...parsed.map(migrateLegacyInsightRun));
       }
     }
   } catch {
-    // ignore malformed legacy insight data
+    /* ignore */
   }
   try {
-    const formalRaw = window.localStorage.getItem(LEGACY_FORMAL_PROJECTS_KEY);
+    const formalRaw = localStorage.getItem(LEGACY_FORMAL_PROJECTS_KEY);
     if (formalRaw) {
       const parsed = JSON.parse(formalRaw) as LegacyFormalProject[];
       if (Array.isArray(parsed)) {
-        projects.push(...parsed.map((item) => migrateLegacyFormalProject(item)));
+        projects.push(...parsed.map(migrateLegacyFormalProject));
       }
     }
   } catch {
-    // ignore malformed legacy formal data
+    /* ignore */
   }
   return projects;
 }
 
-export function readResearchProjects(): ResearchProject[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = window.localStorage.getItem(RESEARCH_PROJECTS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as ResearchProject[];
-      if (Array.isArray(parsed)) return parsed;
+function ensurePrePersonaMessages(project: ResearchProject): ResearchProject {
+  if (project.prePersonaMessages && project.prePersonaMessages.length > 0) {
+    return project;
+  }
+  const questions = project.intentClarify.questions.length
+    ? project.intentClarify.questions
+    : defaultIntentQuestions(project.initialPrompt);
+  const msgs: ChatMessage[] = [
+    {
+      id: `bf-user-${project.id}`,
+      role: 'user',
+      text: project.initialPrompt || project.title,
+      createdAt: project.createdAt,
+    },
+  ];
+  for (const q of questions) {
+    const ans = project.intentClarify.answers[q.id];
+    if (ans?.length) {
+      msgs.push({
+        id: `bf-q-${q.id}`,
+        role: 'assistant',
+        text: q.title,
+        createdAt: project.createdAt + 1,
+      });
+      msgs.push({
+        id: `bf-a-${q.id}`,
+        role: 'user',
+        text: ans.join('、'),
+        createdAt: project.createdAt + 2,
+      });
     }
+  }
+  if (msgs.length === 1) {
+    return {
+      ...project,
+      prePersonaMessages: initialPrePersonaMessages(project.initialPrompt, questions),
+    };
+  }
+  msgs.push({
+    id: `bf-resume-${project.id}`,
+    role: 'assistant',
+    text: '已恢复你此前的选择，可在右侧查看摘要并继续当前环节。',
+    createdAt: Date.now(),
+  });
+  return { ...project, prePersonaMessages: msgs };
+}
+
+export function readResearchProjects(): ResearchProject[] {
+  // #region agent log
+  fetch('http://127.0.0.1:7288/ingest/dbdc2c33-75d3-416a-ae77-97ee35b38cbf',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b8ce08'},body:JSON.stringify({sessionId:'b8ce08',runId:'pre-fix',hypothesisId:'H3',location:'src/utils/researchProjectStore.ts:499',message:'readResearchProjects invoked',data:{key:RESEARCH_PROJECTS_KEY},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
+  try {
+    const raw = localStorage.getItem(RESEARCH_PROJECTS_KEY);
+    // #region agent log
+    fetch('http://127.0.0.1:7288/ingest/dbdc2c33-75d3-416a-ae77-97ee35b38cbf',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b8ce08'},body:JSON.stringify({sessionId:'b8ce08',runId:'pre-fix',hypothesisId:'H4',location:'src/utils/researchProjectStore.ts:503',message:'raw localStorage payload metadata',data:{hasRaw:Boolean(raw),rawLength:raw?.length ?? 0},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    if (!raw) {
+      const migrated = readLegacyProjects();
+      if (migrated.length > 0) {
+        writeResearchProjects(migrated);
+        localStorage.removeItem(LEGACY_INSIGHT_RUNS_KEY);
+        localStorage.removeItem(LEGACY_FORMAL_PROJECTS_KEY);
+      }
+      return migrated;
+    }
+    const parsed = JSON.parse(raw) as ResearchProject[];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((p) =>
+      ensurePrePersonaMessages({
+        ...p,
+        summary: p.summary ?? (truncateProjectTitle(p.initialPrompt || p.title, 80) || '待补充研究摘要'),
+        archived: p.archived ?? false,
+        prePersonaMessages: p.prePersonaMessages ?? [],
+      }),
+    );
   } catch {
-    // ignore malformed current data
+    return [];
   }
-  const migrated = readLegacyProjects();
-  if (migrated.length > 0) {
-    writeResearchProjects(migrated);
-  }
-  return migrated;
 }
 
 export function writeResearchProjects(projects: ResearchProject[]) {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(RESEARCH_PROJECTS_KEY, JSON.stringify(projects));
+  localStorage.setItem(RESEARCH_PROJECTS_KEY, JSON.stringify(projects));
 }

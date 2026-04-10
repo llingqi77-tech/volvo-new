@@ -1,9 +1,6 @@
-export type PersonaTagField = { key: string; label: string; options: string[] };
+export type TagField = { key: string; label: string; options: string[] };
 
-export type PersonaFilterSchemaGroup = { category: string; fields: PersonaTagField[] };
-
-/** 与人设库列表页一致的 7 类 CDP 标签维度（一级分类 + 字段选项池） */
-export const filterSchema: PersonaFilterSchemaGroup[] = [
+export const filterSchema: Array<{ category: string; fields: TagField[] }> = [
   {
     category: '身份信息',
     fields: [

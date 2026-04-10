@@ -1,12 +1,23 @@
 @import "tailwindcss";
 
 @theme {
-  --color-primary: #63fe33;
-  --color-background: #131313;
-  --color-surface: #1c1b1b;
-  --color-surface-hover: #2a2a2a;
-  --color-text-main: #e5e2e1;
-  --color-text-muted: #86957d;
+  /* atypica.ai 配色方案 - 深色主题 + 荧光绿 */
+  --color-primary: #1bff1b;
+  --color-background: #1a191f;
+  --color-surface: #24212a;
+  --color-surface-hover: #2d2935;
+  --color-text-main: #f5f5f5;
+  --color-text-muted: #8a8a8a;
+  --color-border: rgba(255, 255, 255, 0.1);
+  --color-muted: #2d2935;
+  --color-muted-foreground: #a0a0a0;
+  --color-accent: #2d2935;
+  --color-accent-foreground: #f5f5f5;
+  --color-card: #24212a;
+  --color-card-foreground: #f5f5f5;
+  --color-secondary: #2d2935;
+  --color-secondary-foreground: #f5f5f5;
+  --color-ring: #8a8a8a;
 }
 
 body {
@@ -30,6 +41,30 @@ body {
 
 .animate-fade-in {
   animation: fade-in 0.3s ease-out;
+}
+
+/* 对话流等：透明滚动轨道，仅保留灰色滑块（Chrome / Firefox） */
+.chat-scroll-area {
+  scrollbar-width: thin;
+  scrollbar-color: #6b7280 transparent;
+}
+
+.chat-scroll-area::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.chat-scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-scroll-area::-webkit-scrollbar-thumb {
+  background-color: #6b7280;
+  border-radius: 4px;
+}
+
+.chat-scroll-area::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .writing-mode-vertical {

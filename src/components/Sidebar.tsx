@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Database, Users, MessageSquare, User, PanelLeftClose, PanelLeftOpen, ChevronDown, FolderClock, LogOut } from 'lucide-react';
+import { Database, Users, MessageSquare, User, PanelLeftClose, PanelLeftOpen, ChevronDown, LogOut } from 'lucide-react';
 
 export default function Sidebar({
   activeModule,
@@ -111,15 +111,6 @@ export default function Sidebar({
                 >
                   <User size={15} />
                   个人信息
-                </button>
-                <button
-                  onClick={() => setActiveModule('profile-research')}
-                  className={`w-full text-left px-3 py-2 text-sm rounded flex items-center gap-2 ${
-                    activeModule === 'profile-research' ? 'bg-surface text-primary' : 'text-gray-400 hover:bg-surface hover:text-white'
-                  }`}
-                >
-                  <FolderClock size={15} />
-                  我的研究
                 </button>
                 <button
                   onClick={onLogout}
