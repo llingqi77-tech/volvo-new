@@ -27,6 +27,10 @@ export default defineConfig(({mode}) => {
       },
     },
     server: {
+      // Prefer 5173 so we don't collide with the API on 3001 (old setup used 3000→3001 fallback).
+      // strictPort false: if 5173 is taken, Vite tries 5174+ — still safe vs API on 3001.
+      port: Number(process.env.VITE_DEV_PORT) || 5173,
+      strictPort: false,
       hmr: process.env.DISABLE_HMR !== 'true',
       proxy: {
         '/api': {

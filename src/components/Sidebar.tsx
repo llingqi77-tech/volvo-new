@@ -19,7 +19,6 @@ export default function Sidebar({
     { id: 'knowledge', icon: Database, label: '知识库管理' },
     { id: 'persona', icon: Users, label: '人设库管理' },
     { id: 'insight-research', icon: MessageSquare, label: '洞察研究' },
-    { id: 'my-projects', icon: FolderClock, label: '我的项目' },
   ];
 
   return (
