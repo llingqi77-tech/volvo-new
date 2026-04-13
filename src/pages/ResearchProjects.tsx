@@ -29,7 +29,7 @@ const FULL_WIDTH_CHAT_STAGES: ResearchProject['stage'][] = [
   'topicExplore',
 ];
 
-const TIMELINE_STAGES = ['洞察搜索', '调研设计', '人群筛选', '访谈设计', '访谈执行', '报告生成'] as const;
+const TIMELINE_STAGES = ['洞察搜索', '方案设计', '人群筛选', '大纲设计', '访谈执行', '报告生成'] as const;
 
 function stageToTimelineIndex(stage: ProjectStage) {
   if (stage === 'plan') return 1;
@@ -615,15 +615,103 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
     if (projects.length >= 35) return;
     const needed = 35 - projects.length;
     const now = Date.now();
+    const stageCycle: ProjectStage[] = [
+      'fullTimeSourceSelect',
+      'fullDomainSourceSelect',
+      'topicExplore',
+      'plan',
+      'persona',
+      'interviewOutline',
+      'interviewExecution',
+      'materialUpload',
+      'report',
+    ];
     const seeded = Array.from({ length: needed }, (_, idx) => {
       const base = createEmptyProject(`历史模拟项目 ${idx + 1}`);
       const t = now - (idx + 1) * 1000 * 60 * 47;
-      return {
+      const stage = stageCycle[idx % stageCycle.length];
+      const isPublished = stage === 'report' || idx % 3 === 0;
+      const normalizedStage: ProjectStage = isPublished ? 'report' : stage;
+      const topic = `历史模拟项目 ${idx + 1}：主题验证`;
+      const topicProject: ResearchProject = {
         ...base,
+        topicExplore: { ...base.topicExplore, confirmedTopic: topic },
+      };
+      const plan = buildResearchPlan(topicProject);
+      const personasBuilt = buildPersonaCandidates(topicProject, {});
+      const selectedPersonaIds = personasBuilt.personas.slice(0, 5).map((persona) => persona.id);
+      const withPersonaProject: ResearchProject = {
+        ...topicProject,
+        planStage: { plan, confirmed: true },
+        personaStage: {
+          ...topicProject.personaStage,
+          personas: personasBuilt.personas,
+          selectedPersonaIds,
+          matchedFromCdp: personasBuilt.matchedFromCdp,
+          supplementedFromSocial: personasBuilt.supplementedFromSocial,
+          confirmed: true,
+        },
+      };
+      const outline = buildInterviewOutline(withPersonaProject);
+      const transcripts = Object.fromEntries(
+        personasBuilt.personas
+          .slice(0, 5)
+          .map((persona) => [persona.id, buildInterviewTranscript(persona, topic, outline)] as const),
+      );
+      const seededProject: ResearchProject = {
+        ...base,
+        stage: normalizedStage,
+        topicExplore: {
+          ...base.topicExplore,
+          confirmedTopic: ['fullTimeSourceSelect', 'fullDomainSourceSelect'].includes(stage) ? '' : topic,
+          suggestions: stage === 'topicExplore' ? buildTopicSuggestions(topicProject) : base.topicExplore.suggestions,
+        },
+        planStage: {
+          plan: ['fullTimeSourceSelect', 'fullDomainSourceSelect', 'topicExplore'].includes(stage) ? null : plan,
+          confirmed: ['persona', 'interviewOutline', 'interviewExecution', 'materialUpload', 'report'].includes(stage),
+        },
+        personaStage: {
+          ...base.personaStage,
+          personas: ['interviewOutline', 'interviewExecution', 'materialUpload', 'report'].includes(stage)
+            ? personasBuilt.personas
+            : [],
+          selectedPersonaIds: ['interviewOutline', 'interviewExecution', 'materialUpload', 'report'].includes(stage)
+            ? selectedPersonaIds
+            : [],
+          matchedFromCdp: ['interviewOutline', 'interviewExecution', 'materialUpload', 'report'].includes(stage)
+            ? personasBuilt.matchedFromCdp
+            : 0,
+          supplementedFromSocial: ['interviewOutline', 'interviewExecution', 'materialUpload', 'report'].includes(stage)
+            ? personasBuilt.supplementedFromSocial
+            : 0,
+          confirmed: ['interviewOutline', 'interviewExecution', 'materialUpload', 'report'].includes(stage),
+        },
+        interviewOutlineStage: {
+          outline: ['interviewExecution', 'materialUpload', 'report'].includes(stage) ? outline : '',
+          confirmed: ['interviewExecution', 'materialUpload', 'report'].includes(stage),
+        },
+        interviewExecutionStage: {
+          transcripts: ['materialUpload', 'report'].includes(stage) ? transcripts : {},
+          selectedPersonaId: ['materialUpload', 'report'].includes(stage) ? selectedPersonaIds[0] ?? null : null,
+        },
+        reportStage: {
+          report: '',
+          generatedAt: undefined,
+        },
+      };
+      if (normalizedStage === 'report') {
+        seededProject.reportStage = {
+          report: buildFinalReport(seededProject),
+          generatedAt: t,
+        };
+      }
+      return {
+        ...seededProject,
         id: `mock-history-${t}-${idx}`,
         title: `历史模拟项目 ${idx + 1}`,
-        summary: `这是用于分页验证的模拟摘要（第 ${idx + 1} 条），包含研究目标、人群假设与结论提炼。`,
-        archived: idx % 3 === 0,
+        summary: `这是用于分页与阶段回溯验证的模拟项目（第 ${idx + 1} 条），当前停留在「${projectStageLabel(normalizedStage)}」。`,
+        archived: isPublished,
+        createdAt: t - 1000 * 60 * 25,
         updatedAt: t,
       };
     });
@@ -856,6 +944,27 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
 
   const exitProject = () => {
     setActiveProjectId(null);
+    setTopicChatInput('');
+    setOutlineDraft('');
+  };
+
+  const openHistoryProject = (projectId: string) => {
+    const targetProject = projects.find((project) => project.id === projectId);
+    if (!targetProject) return;
+    if (targetProject.archived) {
+      updateProject(projectId, (project) => {
+        const nextProject = project.stage === 'report' ? project : { ...project, stage: 'report' };
+        if (nextProject.reportStage.report) return nextProject;
+        return {
+          ...nextProject,
+          reportStage: {
+            report: buildFinalReport(nextProject),
+            generatedAt: Date.now(),
+          },
+        };
+      });
+    }
+    setActiveProjectId(projectId);
     setTopicChatInput('');
     setOutlineDraft('');
   };
@@ -1144,8 +1253,8 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                   className="rounded-lg border border-white/40 bg-surface px-3 py-2.5 text-sm font-semibold text-white outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
                 >
                   <option value="all" className="bg-surface text-white">全部状态</option>
-                  <option value="active" className="bg-surface text-white">未归档</option>
-                  <option value="archived" className="bg-surface text-white">已归档</option>
+                  <option value="active" className="bg-surface text-white">未发布</option>
+                  <option value="archived" className="bg-surface text-white">已发布</option>
                 </select>
                 <select
                   value={historySortOrder}
@@ -1166,7 +1275,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                     <button
                       key={project.id}
                       type="button"
-                      onClick={() => setActiveProjectId(project.id)}
+                      onClick={() => openHistoryProject(project.id)}
                       className="rounded-2xl border border-white/10 bg-surface p-5 text-left transition-colors hover:bg-surface-hover"
                     >
                       <div className="flex items-start justify-between gap-4">
@@ -1185,7 +1294,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                               toggleArchiveProject(project.id);
                             }}
                             className="rounded-md border border-white/15 p-1.5 text-gray-300 hover:bg-white/10"
-                            title={project.archived ? '取消归档' : '归档'}
+                            title={project.archived ? '取消发布' : '发布'}
                           >
                             {project.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
                           </button>
@@ -1208,7 +1317,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                             project.archived ? 'bg-gray-500/20 text-gray-300' : 'border border-primary/30 bg-primary/15 text-primary'
                           }`}
                         >
-                          {project.archived ? '已归档' : '未归档'}
+                          {project.archived ? '已发布' : '未发布'}
                         </span>
                       </div>
                     </button>
