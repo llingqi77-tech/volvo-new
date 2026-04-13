@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { Archive, ArchiveRestore, ArrowLeft, Bot, Download, FileText, History, Plus, Search, Send, Share2 } from 'lucide-react';
 import { PersonaCdpTagFilterPanel } from '../components/PersonaCdpTagFilterPanel';
 import { PersonaDetailView } from '../components/PersonaDetailView';
@@ -28,12 +29,14 @@ const FULL_WIDTH_CHAT_STAGES: ResearchProject['stage'][] = [
   'topicExplore',
 ];
 
-const TIMELINE_STAGES = ['洞察搜索', '调研设计', '访谈设计', '报告生成'] as const;
+const TIMELINE_STAGES = ['洞察搜索', '调研设计', '人群筛选', '访谈设计', '访谈执行', '报告生成'] as const;
 
 function stageToTimelineIndex(stage: ProjectStage) {
   if (stage === 'plan') return 1;
-  if (stage === 'persona' || stage === 'interviewOutline' || stage === 'materialUpload') return 2;
-  if (stage === 'report') return 3;
+  if (stage === 'persona') return 2;
+  if (stage === 'interviewOutline') return 3;
+  if (stage === 'interviewExecution') return 4;
+  if (stage === 'materialUpload' || stage === 'report') return 5;
   return 0;
 }
 
@@ -173,10 +176,15 @@ function pickRadar(seed: number) {
   return [78, 82, 76, 80, 84, 79, 81].map((base, idx) => Math.min(96, base + ((seed + idx * 7) % 13)));
 }
 
+function hashStringToInt(s: string) {
+  return s.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+}
+
 function buildPersonaCandidates(project: ResearchProject, tagOverrides: Record<string, string>) {
   const topic = project.topicExplore.confirmedTopic || project.initialPrompt || project.title;
-  const cdpCount = project.fullTimeSource.mode === 'skip' && project.fullDomainSource.mode === 'skip' ? 8 : 12;
-  const total = 20;
+  const total = 10 + (hashStringToInt(project.id) % 11);
+  const cdpBase = project.fullTimeSource.mode === 'skip' && project.fullDomainSource.mode === 'skip' ? 8 : 12;
+  const cdpCount = Math.min(cdpBase, total);
   const supplementCount = total - cdpCount;
   const hintTags = Object.values(tagOverrides);
   const personas: InterviewPersona[] = Array.from({ length: total }, (_, idx) => {
@@ -219,6 +227,8 @@ function buildInterviewOutline(project: ResearchProject) {
     project.personaStage.selectedPersonaIds.includes(persona.id),
   );
   const samplePersonaNames = selectedPersonas.slice(0, 4).map((persona) => persona.cardTitle).join('、');
+  const personaCount =
+    selectedPersonas.length > 0 ? selectedPersonas.length : project.personaStage.personas.length;
   return [
     `# ${topic} 访谈大纲`,
     '',
@@ -228,7 +238,7 @@ function buildInterviewOutline(project: ResearchProject) {
     '- 输出可直接进入最终研究报告的关键结论与原始证据',
     '',
     '## 二、目标人设',
-    `- 本轮访谈覆盖 20 个确认人设，重点包括：${samplePersonaNames || '待确认人设'}`,
+    `- 本轮访谈覆盖 ${personaCount} 个确认人设，重点包括：${samplePersonaNames || '待确认人设'}`,
     '',
     '## 三、访谈提纲',
     '1. 破冰：请受访者描述与当前研究主题相关的真实场景与近期经历',
@@ -242,6 +252,27 @@ function buildInterviewOutline(project: ResearchProject) {
     '- 保留原话证据',
     '- 标注情绪强度与场景上下文',
     '- 对出现分歧的观点单独建档',
+  ].join('\n');
+}
+
+function buildInterviewTranscript(persona: InterviewPersona, topic: string, outline: string) {
+  const outlinePreview = outline.split('\n').slice(0, 12).join('\n');
+  return [
+    `## ${persona.name}（${persona.cardTitle}）`,
+    '',
+    '### 访谈背景',
+    `围绕「${topic}」开展的结构化深访。人设标签：${persona.tags.join('、')}。`,
+    '',
+    '### 关键摘录（模拟生成）',
+    `- 受访者：我认为「${topic.slice(0, 24) || '这个主题'}」真正影响决策的是信息是否可验证，而不是宣传话术。`,
+    `- 受访者：${persona.voc}`,
+    `- 受访者：如果只能改一件事，我希望把复杂流程变简单，并明确告诉我风险在哪里。`,
+    '',
+    '### 大纲对照摘要',
+    '以下节选自当前确认的访谈大纲，用于对齐本次对话结构：',
+    outlinePreview,
+    '',
+    '（以上为演示用模拟访谈正文，便于验收「按人设切换查看」的交互。）',
   ].join('\n');
 }
 
@@ -278,10 +309,20 @@ function buildFinalReport(project: ResearchProject) {
     '六、访谈执行说明',
     project.interviewOutlineStage.outline || '暂无访谈大纲',
     '',
-    '七、补充资料情况',
+    '七、各人设访谈摘录',
+    ...Object.entries(project.interviewExecutionStage?.transcripts ?? {})
+      .slice(0, 4)
+      .map(([id, text], idx) => {
+        const persona = project.personaStage.personas.find((p) => p.id === id);
+        const label = persona ? `${persona.name}（${persona.cardTitle}）` : id;
+        return `${idx + 1}. ${label}\n${text.split('\n').slice(0, 6).join('\n')}`;
+      }),
+    ...(Object.keys(project.interviewExecutionStage?.transcripts ?? {}).length === 0 ? ['暂无模拟访谈记录。'] : []),
+    '',
+    '八、补充资料情况',
     uploadSummary,
     '',
-    '八、结论建议',
+    '九、结论建议',
     '1. 先围绕高优先级人群与场景完成深访验证，再补充存在分歧的边缘假设。',
     '2. 把洞察筛选与访谈原话结合，用于形成最终的业务建议与优先级排序。',
     '3. 对未覆盖的资料来源保持追踪，后续可继续回到项目中追加材料与再生成报告。',
@@ -496,6 +537,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
   const [completedThinkingIds, setCompletedThinkingIds] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
+  const interviewContentPanelRef = useRef<HTMLDivElement>(null);
 
   const cdpFieldLabelMap = useMemo(
     () => new Map(filterSchema.flatMap((group) => group.fields.map((field) => [field.key, field.label] as const))),
@@ -553,6 +595,21 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
     );
   };
 
+  const goToPlanFromTopic = (projectId: string, confirmedTopicText: string) => {
+    updateProject(projectId, (project) => ({
+      ...project,
+      stage: 'plan',
+      topicExplore: { ...project.topicExplore, confirmedTopic: confirmedTopicText },
+      planStage: {
+        plan: buildResearchPlan({
+          ...project,
+          topicExplore: { ...project.topicExplore, confirmedTopic: confirmedTopicText },
+        }),
+        confirmed: false,
+      },
+    }));
+  };
+
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     if (projects.length >= 35) return;
@@ -587,7 +644,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
         id: `topic-sugg-${t0}`,
         role: 'assistant',
         variant: 'topic_suggestions',
-        text: '以下候选可与底部输入配合使用：点选后确认主题，再生成调研计划。',
+        text: '以下候选可与底部输入配合使用：点选后将确认主题，并在对话流中展示下一步卡片，可在卡片中生成调研计划。',
         createdAt: t0 + 1,
       };
       updateProject(activeProject.id, (project) => ({
@@ -615,7 +672,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
             id: `topic-sugg-mig-${t}`,
             role: 'assistant',
             variant: 'topic_suggestions',
-            text: '以下候选可与底部输入配合使用：点选后确认主题，再生成调研计划。',
+            text: '以下候选可与底部输入配合使用：点选后将确认主题，并在对话流中展示下一步卡片，可在卡片中生成调研计划。',
             createdAt: t,
           },
         ],
@@ -668,7 +725,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
           {
             id: `plan-ready-${Date.now()}`,
             role: 'assistant',
-            text: '已根据当前主题与洞察范围生成调研计划草案，请在右侧查看。可点击「重新生成」或确认后进入人设匹配。',
+            text: '已根据当前主题与洞察范围生成调研计划草案，请在右侧查看。可点击「重新生成」或确认后进入人群筛选。',
             createdAt: Date.now(),
           },
         ],
@@ -692,7 +749,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
           {
             id: `persona-enter-${Date.now()}`,
             role: 'assistant',
-            text: '已进入访谈人设筛选。左侧可继续查看对话摘要，下方可调整 CDP 标签并重新生成候选人设。',
+            text: `进入人群筛选。已根据研究主题匹配到${built.personas.length}位人设。下方可调整 CDP 标签并重新生成候选人设。`,
             createdAt: Date.now(),
           },
         ],
@@ -709,7 +766,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
           {
             id: `outline-enter-${t}`,
             role: 'assistant',
-            text: '已进入访谈大纲确认。左侧为前序对话摘要，下方可继续对话，编辑大纲。',
+            text: '已进入访谈设计：生成与调整访谈大纲。左侧为前序对话摘要，下方可继续对话并驱动右侧大纲更新。',
             createdAt: t,
           },
           {
@@ -721,6 +778,48 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
         ],
       }));
       setOutlineDraft(nextOutline);
+    }
+    if (
+      activeProject.stage === 'interviewExecution' &&
+      !activeProject.prePersonaMessages.some((m) => m.variant === 'interview_content_ready')
+    ) {
+      updateProject(activeProject.id, (project) => {
+        const topic = project.topicExplore.confirmedTopic || project.initialPrompt || project.title;
+        const outline = project.interviewOutlineStage.outline;
+        const selected = project.personaStage.personas.filter((persona) =>
+          project.personaStage.selectedPersonaIds.includes(persona.id),
+        );
+        const personasForTranscripts = selected.length > 0 ? selected : project.personaStage.personas;
+        const transcripts: Record<string, string> = {};
+        for (const persona of personasForTranscripts) {
+          transcripts[persona.id] = buildInterviewTranscript(persona, topic, outline);
+        }
+        const t = Date.now();
+        const firstId = personasForTranscripts[0]?.id ?? null;
+        return {
+          ...project,
+          interviewExecutionStage: {
+            transcripts,
+            selectedPersonaId: project.interviewExecutionStage.selectedPersonaId ?? firstId,
+          },
+          prePersonaMessages: [
+            ...project.prePersonaMessages,
+            {
+              id: `interview-exec-enter-${t}`,
+              role: 'assistant',
+              text: '已进入访谈执行。系统已基于确认的访谈大纲与入选人设生成各人设的模拟访谈正文；点击下方状态卡片可在右侧查看与切换。',
+              createdAt: t,
+            },
+            {
+              id: `interview-content-ready-${t}`,
+              role: 'assistant',
+              variant: 'interview_content_ready',
+              text: '访谈内容已生成',
+              createdAt: t + 1,
+            },
+          ],
+        };
+      });
     }
     if (activeProject.stage === 'report' && !activeProject.reportStage.report) {
       updateProject(activeProject.id, (project) => ({
@@ -812,16 +911,43 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
     if (!activeProject) return;
     const userText = topicChatInput.trim();
     if (!userText) return;
-    const userMsg: ChatMessage = { id: `user-${Date.now()}`, role: 'user', text: userText, createdAt: Date.now() };
+    const t = Date.now();
+    const userMsg: ChatMessage = { id: `user-${t}`, role: 'user', text: userText, createdAt: t };
+
+    if (activeProject.stage === 'interviewExecution') {
+      const asstMsg: ChatMessage = {
+        id: `assistant-${t + 1}`,
+        role: 'assistant',
+        text: `已记录你的补充：「${userText}」。当前各人设访谈内容为执行阶段快照；如需结构性调整，请返回「访谈设计」修订大纲后再次进入访谈执行。`,
+        createdAt: t + 1,
+      };
+      updateProject(activeProject.id, (project) => ({
+        ...project,
+        prePersonaMessages: [...project.prePersonaMessages, userMsg, asstMsg],
+      }));
+      setTopicChatInput('');
+      return;
+    }
+
     const asstMsg: ChatMessage = {
-      id: `assistant-${Date.now() + 1}`,
+      id: `assistant-${t + 1}`,
       role: 'assistant',
       text: buildTopicReply(activeProject, userText),
-      createdAt: Date.now() + 1,
+      createdAt: t + 1,
     };
     updateProject(activeProject.id, (project) => ({
       ...(() => {
         const refinedTopic = buildRefinedTopic(project, userText);
+        const planCardMsg: ChatMessage | null =
+          project.stage === 'topicExplore'
+            ? {
+                id: `topic-plan-card-${t + 2}`,
+                role: 'assistant',
+                variant: 'topic_confirmed_plan_card',
+                text: refinedTopic,
+                createdAt: t + 2,
+              }
+            : null;
         const nextProject = {
           ...project,
           topicExplore: {
@@ -830,7 +956,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
             suggestions: [`${userText} 的决策动因与阻碍`, `${userText} 在关键人群中的差异`, `${userText} 的优先验证路径`],
             messages: [...project.topicExplore.messages, userMsg, asstMsg],
           },
-          prePersonaMessages: [...project.prePersonaMessages, userMsg, asstMsg],
+          prePersonaMessages: [...project.prePersonaMessages, userMsg, asstMsg, ...(planCardMsg ? [planCardMsg] : [])],
         };
         if (project.stage === 'plan') {
           return {
@@ -1227,7 +1353,9 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
           placeholder={
             activeProject.stage === 'interviewOutline'
               ? '继续输入你的想法，可完善并修改大纲'
-              : '继续输入你的想法（如目标人群、关键场景、待验证假设），我会据此收敛正式研究主题…'
+              : activeProject.stage === 'interviewExecution'
+                ? '记录执行备注或现场补充（不自动改写已生成的访谈正文）…'
+                : '继续输入你的想法（如目标人群、关键场景、待验证假设），我会据此收敛正式研究主题…'
           }
         />
         <div className="flex justify-end">
@@ -1239,23 +1367,6 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
             <Send size={16} />
           </button>
         </div>
-        {activeProject.topicExplore.confirmedTopic && activeProject.stage === 'topicExplore' && (
-          <div className="mt-3 border-t border-white/10 pt-3">
-            <button
-              type="button"
-              onClick={() =>
-                updateProject(activeProject.id, (project) => ({
-                  ...project,
-                  stage: 'plan' as const,
-                  planStage: { plan: buildResearchPlan(project), confirmed: false },
-                }))
-              }
-              className="mt-2 w-full rounded-lg bg-primary py-2 text-sm font-bold text-black hover:bg-primary/90"
-            >
-              生成调研计划
-            </button>
-          </div>
-        )}
       </div>
     );
   }
@@ -1666,6 +1777,48 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
       );
     }
 
+    if (message.variant === 'interview_content_ready') {
+      if (shouldWaitForPrevThinking) return null;
+      return (
+        <AssistantAvatarRow showIdentity={showIdentity}>
+          <button
+            type="button"
+            onClick={() => interviewContentPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+            className="w-full max-w-md rounded-2xl border border-primary/50 bg-primary/15 px-4 py-3 text-left shadow-[0_0_0_1px_rgba(27,255,27,0.12)] transition-colors hover:bg-primary/25"
+          >
+            <p className="text-[10px] font-bold uppercase tracking-wide text-primary">研究状态</p>
+            <p className="mt-1 text-sm font-bold text-primary">{message.text}</p>
+            <p className="mt-1 text-xs text-gray-400">点击查看右侧各人设的具体访谈内容</p>
+          </button>
+        </AssistantAvatarRow>
+      );
+    }
+
+    if (message.variant === 'topic_confirmed_plan_card') {
+      if (shouldWaitForPrevThinking) return null;
+      const topicLine = message.text.trim();
+      if (!topicLine) return null;
+      return (
+        <AssistantAvatarRow showIdentity={showIdentity}>
+          <div className="w-full max-w-lg rounded-2xl border border-primary/45 bg-primary/10 px-4 py-3 shadow-[0_0_0_1px_rgba(27,255,27,0.12)]">
+            <p className="text-sm leading-relaxed text-gray-100">
+              当前研究主题已确定为：<span className="font-bold text-primary">{topicLine}</span>
+              。接下来可以生成调研计划，或继续在下方说明里微调主题。
+            </p>
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={() => goToPlanFromTopic(p.id, topicLine)}
+                className="w-full rounded-lg bg-primary py-2.5 text-sm font-bold text-black hover:bg-primary/90"
+              >
+                生成调研计划
+              </button>
+            </div>
+          </div>
+        </AssistantAvatarRow>
+      );
+    }
+
     if (message.variant === 'topic_suggestions') {
       if (shouldWaitForPrevThinking) return null;
       const isActive = p.stage === 'topicExplore' && message.id === lastTopicSuggestionsMsgId;
@@ -1702,9 +1855,10 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                           prePersonaMessages: [
                             ...project.prePersonaMessages,
                             {
-                              id: `topic-confirm-${now}`,
+                              id: `topic-plan-card-${now}`,
                               role: 'assistant',
-                              text: `已确认研究主题：${suggestion}`,
+                              variant: 'topic_confirmed_plan_card',
+                              text: suggestion,
                               createdAt: now,
                             },
                           ],
@@ -1728,7 +1882,11 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
     }
 
     const isMilestoneMessage =
-      message.text.startsWith('已确认研究主题：') || message.text.startsWith('已进入访谈人设筛选');
+      message.text.startsWith('已进入访谈人设筛选') ||
+      message.text.startsWith('进入人群筛选') ||
+      message.text.startsWith('已进入人群筛选') ||
+      message.text.startsWith('已进入访谈设计') ||
+      message.text.startsWith('已进入访谈执行');
     return (
       <AssistantAvatarRow showIdentity={showIdentity}>
         {isMilestoneMessage ? (
@@ -1745,7 +1903,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
   }
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="border-b border-white/10 px-8 py-4 shrink-0">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
@@ -1852,15 +2010,15 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                   }
                   className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90"
                 >
-                  确认研究计划并进入人设匹配
+                  确认研究计划并进入人群筛选
                 </button>
               </div>
             </div>
           </div>
         </div>
       ) : activeProject.stage === 'persona' ? (
-        <div className="flex flex-1 min-h-0">
-          <div className="flex min-w-0 basis-1/2 flex-col border-r border-white/10">
+        <div className="flex min-h-0 flex-1">
+          <div className="flex min-h-0 min-w-0 flex-1 basis-1/2 flex-col border-r border-white/10">
             <div ref={chatScrollRef} className="chat-scroll-area min-h-0 flex-1 overflow-y-auto px-3 py-4 space-y-3">
               {(() => {
                 const recentMessages = activeProject.prePersonaMessages.slice(-12);
@@ -1900,7 +2058,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                         }}
                         className="mt-3 w-full rounded-lg bg-primary py-2 text-sm font-bold text-black hover:bg-primary/90"
                       >
-                        应用筛选并刷新候选人设
+                        应用并生成新人设
                       </button>
                     </div>
                   </>
@@ -1908,11 +2066,16 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
               })()}
             </div>
           </div>
-          <div className="flex min-w-0 basis-1/2 flex-col overflow-hidden rounded-2xl border border-primary p-4 shadow-[0_0_0_1px_rgba(27,255,27,0.4),0_0_24px_rgba(27,255,27,0.15)]">
+          <div className="flex min-h-0 min-w-0 flex-1 basis-1/2 flex-col overflow-hidden rounded-2xl border border-primary p-4 shadow-[0_0_0_1px_rgba(27,255,27,0.4),0_0_24px_rgba(27,255,27,0.15)]">
             <div className="chat-scroll-area min-h-0 flex-1 overflow-y-auto">
               <p className="mb-3 text-sm text-gray-400">
-                共 {activeProject.personaStage.personas.length} 个候选人设 · CDP {activeProject.personaStage.matchedFromCdp}{' '}
-                · VOC {activeProject.personaStage.supplementedFromSocial}
+                {(() => {
+                  const list = activeProject.personaStage.personas;
+                  const cdpN = list.filter((x) => x.sourcePool === 'cdp').length;
+                  const vocN = list.filter((x) => x.sourcePool === 'voc').length;
+                  const mixN = list.filter((x) => x.sourcePool === 'cdp_voc').length;
+                  return `共 ${list.length} 个候选人设 · CDP ${cdpN} 位 · VOC ${vocN} 位 · CDP+VOC ${mixN} 位`;
+                })()}
               </p>
               {selectedPersona ? (
                 <div className="space-y-4">
@@ -1958,9 +2121,16 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                           {persona.sourcePool === 'cdp' ? 'CDP' : persona.sourcePool === 'cdp_voc' ? 'CDP+VOC' : 'VOC'}
                         </span>
                       </div>
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        {persona.tags.map((tag) => (
-                          <span key={tag} className="rounded bg-blue-500/20 px-1.5 py-0.5 text-[10px] text-blue-300">
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {persona.tags.slice(0, 2).map((tag, tagIdx) => (
+                          <span
+                            key={`${persona.id}-${tag}-${tagIdx}`}
+                            className={
+                              tagIdx === 0
+                                ? 'rounded px-2 py-1 bg-blue-500/20 text-xs text-blue-400'
+                                : 'rounded px-2 py-1 bg-surface-hover text-xs text-gray-300'
+                            }
+                          >
                             {tag}
                           </span>
                         ))}
@@ -1981,15 +2151,15 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                   }
                   className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90"
                 >
-                  确认这 20 个人设并生成访谈大纲
+                  确认这 {activeProject.personaStage.personas.length} 个人设并生成访谈大纲
                 </button>
               </div>
             </div>
           </div>
         </div>
       ) : activeProject.stage === 'interviewOutline' ? (
-        <div className="flex flex-1 min-h-0">
-          <div className="flex min-w-0 basis-1/2 flex-col border-r border-white/10">
+        <div className="flex min-h-0 flex-1">
+          <div className="flex min-h-0 min-w-0 flex-1 basis-1/2 flex-col border-r border-white/10">
             <div ref={chatScrollRef} className="chat-scroll-area min-h-0 flex-1 overflow-y-auto px-3 py-4 space-y-3">
               {activeProject.prePersonaMessages.map((message, idx) => (
                 <div key={message.id}>{renderPrePersonaStreamMessage(message, idx)}</div>
@@ -1997,7 +2167,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
             </div>
             <div className="shrink-0 border-t border-white/10 p-4">{renderTopicComposerBar()}</div>
           </div>
-          <div className="chat-scroll-area flex min-w-0 basis-1/2 flex-col overflow-y-auto rounded-2xl border border-primary p-4 shadow-[0_0_0_1px_rgba(27,255,27,0.4),0_0_24px_rgba(27,255,27,0.15)]">
+          <div className="chat-scroll-area flex min-h-0 min-w-0 flex-1 basis-1/2 flex-col overflow-y-auto rounded-2xl border border-primary p-4 shadow-[0_0_0_1px_rgba(27,255,27,0.4),0_0_24px_rgba(27,255,27,0.15)]">
             <div className="chat-scroll-area min-h-0 flex-1 overflow-y-auto rounded-2xl border border-white/10 bg-white p-8 text-black shadow-2xl">
               <div className="border-b border-zinc-200 pb-4">
                 <div className="flex items-center justify-between gap-3">
@@ -2020,23 +2190,143 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                 <h4 className="mt-3 text-3xl font-black">{activeProject.topicExplore.confirmedTopic || activeProject.title} 访谈大纲</h4>
                 <p className="mt-2 text-sm text-zinc-500">可在左侧对话中补充信息，发送后自动刷新大纲内容</p>
               </div>
-              <div className="mt-6 whitespace-pre-wrap text-sm leading-7 text-zinc-800">{outlineDraft}</div>
+              <div className="mt-6 whitespace-pre-wrap text-sm leading-7 text-zinc-800">
+                <StreamText
+                  text={outlineDraft}
+                  pre
+                  cadenceMs={12}
+                  chunkDivisor={48}
+                  className="whitespace-pre-wrap font-sans text-sm leading-7 text-zinc-800"
+                />
+              </div>
             </div>
             <div className="mt-4 flex shrink-0 justify-end gap-3">
-              <button
+                <button
                 type="button"
                 onClick={() =>
                   updateProject(activeProject.id, (project) => ({
                     ...project,
-                    stage: 'materialUpload',
+                    stage: 'interviewExecution',
                     interviewOutlineStage: { outline: outlineDraft, confirmed: true },
                   }))
                 }
                 className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90"
               >
-                确认访谈大纲并进入执行
+                确认访谈大纲并进入访谈执行
               </button>
             </div>
+          </div>
+        </div>
+      ) : activeProject.stage === 'interviewExecution' ? (
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <div className="flex min-h-0 min-w-0 flex-1 basis-1/2 flex-col overflow-hidden border-r border-white/10">
+            <div ref={chatScrollRef} className="chat-scroll-area min-h-0 flex-1 overflow-y-auto px-3 py-4 space-y-3">
+              {activeProject.prePersonaMessages.map((message, idx) => (
+                <div key={message.id}>{renderPrePersonaStreamMessage(message, idx)}</div>
+              ))}
+            </div>
+            <div className="shrink-0 border-t border-white/10 bg-background p-4">
+              {renderTopicComposerBar()}
+            </div>
+          </div>
+          <div
+            ref={interviewContentPanelRef}
+            className="flex min-h-0 min-w-0 flex-1 basis-1/2 flex-col overflow-hidden rounded-2xl border border-primary p-4 shadow-[0_0_0_1px_rgba(27,255,27,0.4),0_0_24px_rgba(27,255,27,0.15)]"
+          >
+            {(() => {
+              const tabPersonas = activeProject.personaStage.personas.filter((persona) =>
+                activeProject.personaStage.selectedPersonaIds.includes(persona.id),
+              );
+              const personasForTabs =
+                tabPersonas.length > 0 ? tabPersonas : activeProject.personaStage.personas;
+              const currentId =
+                activeProject.interviewExecutionStage.selectedPersonaId ?? personasForTabs[0]?.id ?? null;
+              const body =
+                currentId && activeProject.interviewExecutionStage.transcripts[currentId]
+                  ? activeProject.interviewExecutionStage.transcripts[currentId]
+                  : '访谈内容生成中，请稍候…';
+              const currentPersona = currentId ? personasForTabs.find((p) => p.id === currentId) : undefined;
+              const previewKey = currentId ?? 'none';
+              return (
+                <>
+                  <div className="chat-scroll-area flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/10 bg-white text-black shadow-2xl">
+                    <AnimatePresence mode="wait" initial={false}>
+                      <motion.div
+                        key={previewKey}
+                        role="document"
+                        aria-label={currentPersona ? `${currentPersona.cardTitle} 访谈记录` : '访谈记录'}
+                        initial={{ opacity: 0, x: 28 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -22 }}
+                        transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+                        className="chat-scroll-area min-h-0 flex-1 overflow-y-auto p-6"
+                      >
+                        <div className="border-b border-zinc-200 pb-3">
+                          <div className="flex items-baseline justify-between gap-3">
+                            <h4 className="text-xl font-black">访谈</h4>
+                            <span className="shrink-0 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-zinc-500">
+                              PDF 预览
+                            </span>
+                          </div>
+                          <p className="mt-1 text-xs text-zinc-500">
+                            {activeProject.topicExplore.confirmedTopic || activeProject.title}
+                          </p>
+                          {currentPersona && (
+                            <p className="mt-2 text-sm font-semibold text-zinc-800">当前人设 · {currentPersona.cardTitle}</p>
+                          )}
+                        </div>
+                        <div className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-zinc-800">{body}</div>
+                      </motion.div>
+                    </AnimatePresence>
+                  </div>
+                  <div className="mt-3 shrink-0 border-t border-white/10 pt-3">
+                    <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-gray-500">人设</p>
+                    <div className="grid grid-cols-5 gap-2">
+                      {personasForTabs.map((persona) => {
+                        const isOn = persona.id === currentId;
+                        return (
+                          <button
+                            key={persona.id}
+                            type="button"
+                            onClick={() =>
+                              updateProject(activeProject.id, (project) => ({
+                                ...project,
+                                interviewExecutionStage: {
+                                  ...project.interviewExecutionStage,
+                                  selectedPersonaId: persona.id,
+                                },
+                              }))
+                            }
+                            className={`min-w-0 truncate rounded-lg border px-2 py-1.5 text-center text-xs font-semibold transition-colors ${
+                              isOn
+                                ? 'border-primary bg-primary/20 text-primary'
+                                : 'border-white/15 bg-white/5 text-gray-300 hover:bg-white/10'
+                            }`}
+                            title={persona.cardTitle}
+                          >
+                            {persona.cardTitle}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="mt-4 flex shrink-0 justify-end">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateProject(activeProject.id, (project) => ({
+                          ...project,
+                          stage: 'materialUpload',
+                        }))
+                      }
+                      className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90"
+                    >
+                      继续补充资料并生成报告
+                    </button>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       ) : (

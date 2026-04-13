@@ -99,13 +99,21 @@ export default function App() {
         onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
         onLogout={handleLogout}
       />
-      <div className="flex-1 flex flex-col relative">
-        <main className="flex-1 overflow-y-auto">
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <main className="min-h-0 flex-1 overflow-y-auto">
           {activeModule === 'knowledge' && <KnowledgeBase docs={docs} setDocs={setDocs} />}
           {activeModule === 'persona' && <PersonaLibrary />}
-          {activeModule === 'insight-research' && <ResearchProjects entryMode="insight" />}
+          {activeModule === 'insight-research' && (
+            <div className="h-full min-h-0">
+              <ResearchProjects entryMode="insight" />
+            </div>
+          )}
           {activeModule === 'profile-info' && <ProfileCenter section="info" />}
-          {activeModule === 'profile-research' && <ResearchProjects entryMode="insight" />}
+          {activeModule === 'profile-research' && (
+            <div className="h-full min-h-0">
+              <ResearchProjects entryMode="insight" />
+            </div>
+          )}
         </main>
       </div>
     </div>

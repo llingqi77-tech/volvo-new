@@ -8,6 +8,7 @@ export type ProjectStage =
   | 'plan'
   | 'persona'
   | 'interviewOutline'
+  | 'interviewExecution'
   | 'materialUpload'
   | 'report';
 
@@ -27,7 +28,9 @@ export type ChatMessageVariant =
   | 'cta_proceed_fulltime'
   | 'fulltime_form'
   | 'domain_form'
-  | 'topic_suggestions';
+  | 'topic_suggestions'
+  | 'topic_confirmed_plan_card'
+  | 'interview_content_ready';
 
 export type ChatMessage = {
   id: string;
@@ -125,6 +128,11 @@ export type ResearchProject = {
     outline: string;
     confirmed: boolean;
   };
+  /** 访谈执行：模拟生成的各人设访谈正文 */
+  interviewExecutionStage: {
+    transcripts: Record<string, string>;
+    selectedPersonaId: string | null;
+  };
   materialUploadStage: {
     files: UploadedMaterial[];
     skipped: boolean;
@@ -195,6 +203,8 @@ export function projectStageLabel(stage: ProjectStage) {
       return '筛选访谈人设';
     case 'interviewOutline':
       return '确认访谈大纲';
+    case 'interviewExecution':
+      return '访谈执行';
     case 'materialUpload':
       return '补充访谈资料';
     case 'report':
@@ -332,6 +342,10 @@ export function createEmptyProject(initialPrompt = ''): ResearchProject {
     interviewOutlineStage: {
       outline: '',
       confirmed: false,
+    },
+    interviewExecutionStage: {
+      transcripts: {},
+      selectedPersonaId: null,
     },
     materialUploadStage: {
       files: [],
@@ -515,14 +529,21 @@ export function readResearchProjects(): ResearchProject[] {
     }
     const parsed = JSON.parse(raw) as ResearchProject[];
     if (!Array.isArray(parsed)) return [];
-    return parsed.map((p) =>
-      ensurePrePersonaMessages({
+    return parsed.map((p) => {
+      const base = ensurePrePersonaMessages({
         ...p,
         summary: p.summary ?? (truncateProjectTitle(p.initialPrompt || p.title, 80) || '待补充研究摘要'),
         archived: p.archived ?? false,
         prePersonaMessages: p.prePersonaMessages ?? [],
-      }),
-    );
+      });
+      return {
+        ...base,
+        interviewExecutionStage: base.interviewExecutionStage ?? {
+          transcripts: {},
+          selectedPersonaId: null,
+        },
+      };
+    });
   } catch {
     return [];
   }

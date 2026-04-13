@@ -1,4 +1,14 @@
-import { useMemo, useRef, useState } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from 'react';
 import { Plus, ArrowLeft, FileUp, Bot, Send } from 'lucide-react';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer } from 'recharts';
 import Modal from '../components/Modal';
@@ -10,16 +20,150 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url
 ).toString();
 
+type TagField = { key: string; label: string; options: string[] };
+type FilterGroup = { category: string; fields: TagField[] };
+
+function PersonaTagCategoryRow({
+  group,
+  isPoolOpen,
+  selectedTagValues,
+  setSelectedTagValues,
+  onPoolEnter,
+  onPoolLeave,
+}: {
+  group: FilterGroup;
+  isPoolOpen: boolean;
+  selectedTagValues: Record<string, string>;
+  setSelectedTagValues: Dispatch<SetStateAction<Record<string, string>>>;
+  onPoolEnter: (category: string) => void;
+  onPoolLeave: () => void;
+}) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [openUp, setOpenUp] = useState(false);
+
+  const measurePanelLayout = useCallback(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+
+    const wrapRect = wrap.getBoundingClientRect();
+
+    if (!isPoolOpen || !panelRef.current) return;
+    const ph = panelRef.current.getBoundingClientRect().height;
+    const margin = 8;
+    const spaceBelow = window.innerHeight - wrapRect.bottom - margin;
+    const spaceAbove = wrapRect.top - margin;
+    const fitsBelow = spaceBelow >= Math.min(ph, 320);
+    setOpenUp(!fitsBelow && spaceAbove > spaceBelow);
+  }, [isPoolOpen]);
+
+  useLayoutEffect(() => {
+    measurePanelLayout();
+  }, [measurePanelLayout, isPoolOpen, group.category, selectedTagValues]);
+
+  useLayoutEffect(() => {
+    if (!isPoolOpen) return;
+    const onScrollOrResize = () => measurePanelLayout();
+    window.addEventListener('scroll', onScrollOrResize, true);
+    window.addEventListener('resize', onScrollOrResize);
+    return () => {
+      window.removeEventListener('scroll', onScrollOrResize, true);
+      window.removeEventListener('resize', onScrollOrResize);
+    };
+  }, [isPoolOpen, measurePanelLayout]);
+
+  const isFieldFiltered = (fieldKey: string) => {
+    const v = selectedTagValues[fieldKey];
+    return typeof v === 'string' && v.length > 0 && v !== '全部';
+  };
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <div className="grid grid-cols-12 gap-2 items-center py-1">
+        <div className="col-span-2">
+          <p className="text-[12px] font-bold text-white leading-5">{group.category}</p>
+        </div>
+
+        <div
+          className="col-span-10 flex items-center gap-[3px] text-[11px] text-gray-300 leading-5 truncate cursor-default"
+          onMouseEnter={() => onPoolEnter(group.category)}
+          onMouseLeave={onPoolLeave}
+          title={group.fields.map((f) => f.label).join('/')}
+        >
+          {group.fields.map((f, idx) => {
+            const filtered = isFieldFiltered(f.key);
+            return (
+              <span key={f.key} className="inline-flex items-center shrink-0">
+                <span className={filtered ? 'font-semibold text-primary' : undefined}>{f.label}</span>
+                {idx < group.fields.length - 1 && <span className="mx-[3px] shrink-0 text-gray-500">/</span>}
+              </span>
+            );
+          })}
+        </div>
+      </div>
+
+      {isPoolOpen && (
+        <div
+          ref={panelRef}
+          className={`absolute left-1/2 z-30 w-max min-w-0 max-w-full -translate-x-1/2 bg-surface border border-white/10 rounded-lg py-3 px-[calc(0.75rem+1ch)] shadow-2xl max-h-[min(18rem,55vh)] overflow-y-auto ${
+            openUp ? 'bottom-full mb-1' : 'top-full mt-1'
+          }`}
+          onMouseEnter={() => onPoolEnter(group.category)}
+          onMouseLeave={onPoolLeave}
+        >
+          <p className="text-xs font-bold text-white mb-2 whitespace-nowrap">{group.category} 标签池</p>
+          <div className="grid w-full min-w-0 grid-cols-[auto_1fr] gap-x-[3ch] gap-y-2 items-start">
+            {group.fields.map((field) => {
+              const currentValue = selectedTagValues[field.key] ?? '全部';
+              const filtered = isFieldFiltered(field.key);
+              return (
+                <Fragment key={field.key}>
+                  <div
+                    className={`self-start pt-0.5 text-[11px] ${filtered ? 'font-semibold text-primary' : 'text-gray-400'}`}
+                  >
+                    {field.label}
+                  </div>
+                  <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-1">
+                    {['全部', ...field.options].map((opt) => {
+                      const selected = currentValue === opt;
+                      return (
+                        <button
+                          key={`${field.key}-${opt}`}
+                          type="button"
+                          onClick={() => {
+                            setSelectedTagValues((prev) => {
+                              if (opt === '全部') {
+                                const next = { ...prev };
+                                delete next[field.key];
+                                return next;
+                              }
+                              return { ...prev, [field.key]: opt };
+                            });
+                          }}
+                          className={`text-[11px] transition-colors ${
+                            selected ? 'text-primary' : 'text-gray-300 hover:text-white'
+                          }`}
+                        >
+                          {opt}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </Fragment>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function PersonaLibrary() {
   // 筛选状态
   const [selectedTagValues, setSelectedTagValues] = useState<Record<string, string>>({});
   const [selectedProvenance, setSelectedProvenance] = useState<Array<'first' | 'third' | 'deep_interview'>>([]);
   const [activeTagPoolCategory, setActiveTagPoolCategory] = useState<string | null>(null);
-  const [tagPoolStyle, setTagPoolStyle] = useState<{ top: number; left: number; width: number }>({
-    top: 0,
-    left: 0,
-    width: 560,
-  });
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
   const [isPersonaChatOpen, setIsPersonaChatOpen] = useState(false);
@@ -27,11 +171,13 @@ export default function PersonaLibrary() {
   const [personaChatMessages, setPersonaChatMessages] = useState<Array<{ id: string; role: 'user' | 'assistant'; text: string }>>([]);
   const [selectedPdfFiles, setSelectedPdfFiles] = useState<File[]>([]);
   const [isParsing, setIsParsing] = useState(false);
+  const PERSONA_LIST_PAGE_SIZE = 10;
+  const [personaListPage, setPersonaListPage] = useState(1);
+  const personaCardTagClass = 'px-2 py-1 bg-surface-hover text-gray-300 text-xs rounded';
   const uploadRef = useRef<HTMLInputElement>(null);
   const tagPoolCloseTimerRef = useRef<number | null>(null);
 
-  type TagField = { key: string; label: string; options: string[] };
-  const filterSchema: Array<{ category: string; fields: TagField[] }> = [
+  const filterSchema: FilterGroup[] = [
     { category: '身份信息', fields: [
       { key: 'gender', label: '性别', options: ['男', '女'] },
       { key: 'age', label: '年龄', options: ['18–25', '26–35', '36–45', '46–60'] },
@@ -251,6 +397,23 @@ export default function PersonaLibrary() {
     return result;
   }, [allPersonas, selectedProvenance, selectedTagValues]);
 
+  const personaListTotalPages = Math.max(1, Math.ceil(filteredPersonas.length / PERSONA_LIST_PAGE_SIZE));
+  const safePersonaListPage = Math.min(Math.max(1, personaListPage), personaListTotalPages);
+
+  const pagedPersonas = useMemo(() => {
+    const start = (safePersonaListPage - 1) * PERSONA_LIST_PAGE_SIZE;
+    return filteredPersonas.slice(start, start + PERSONA_LIST_PAGE_SIZE);
+  }, [filteredPersonas, safePersonaListPage]);
+
+  useEffect(() => {
+    setPersonaListPage(1);
+  }, [selectedTagValues, selectedProvenance, allPersonas.length]);
+
+  useEffect(() => {
+    const c = Math.min(Math.max(1, personaListPage), personaListTotalPages);
+    if (c !== personaListPage) setPersonaListPage(c);
+  }, [personaListPage, personaListTotalPages]);
+
   const selectedPersona = useMemo(
     () => allPersonas.find((p) => p.id === selectedPersonaId) ?? null,
     [allPersonas, selectedPersonaId],
@@ -285,13 +448,6 @@ export default function PersonaLibrary() {
     setSelectedPdfFiles((prev) => [...prev, ...valid]);
   };
 
-  // 重置所有筛选
-  const resetFilters = () => {
-    setSelectedProvenance([]);
-    setSelectedTagValues({});
-    setActiveTagPoolCategory(null);
-  };
-
   const scheduleCloseTagPool = () => {
     if (tagPoolCloseTimerRef.current) {
       window.clearTimeout(tagPoolCloseTimerRef.current);
@@ -301,28 +457,18 @@ export default function PersonaLibrary() {
     }, 120);
   };
 
-  const keepTagPoolOpen = (category: string, anchorEl?: HTMLElement | null) => {
+  const clearAllFilters = () => {
+    setSelectedProvenance([]);
+    setSelectedTagValues({});
+    setActiveTagPoolCategory(null);
+  };
+
+  const keepTagPoolOpen = (category: string) => {
     if (tagPoolCloseTimerRef.current) {
       window.clearTimeout(tagPoolCloseTimerRef.current);
       tagPoolCloseTimerRef.current = null;
     }
     setActiveTagPoolCategory(category);
-    if (anchorEl) {
-      const rect = anchorEl.getBoundingClientRect();
-      const viewportPadding = 12;
-      const preferredWidth = 560;
-      const width = Math.min(preferredWidth, Math.max(320, window.innerWidth - viewportPadding * 2));
-      const preferredLeft = rect.right + 8;
-      const left = Math.max(
-        viewportPadding,
-        Math.min(preferredLeft, window.innerWidth - width - viewportPadding),
-      );
-      const top = Math.max(
-        viewportPadding,
-        Math.min(rect.top, window.innerHeight - 360 - viewportPadding),
-      );
-      setTagPoolStyle({ top, left, width });
-    }
   };
 
   const extractPdfText = async (file: File) => {
@@ -575,213 +721,185 @@ export default function PersonaLibrary() {
           className="bg-primary text-black font-bold px-6 py-3 rounded flex items-center gap-2 hover:bg-primary/90 transition-colors"
         >
           <Plus size={20} />
-          上传 PDF 生成人设
+          新增人设
         </button>
       </div>
 
       <div className="grid grid-cols-12 gap-6 mb-8">
-        <div className="col-span-12 bg-surface p-4 rounded-xl">
-          <p className="text-white text-base font-bold mb-2">已筛选标签值</p>
-          <div className="mb-1 text-xs text-gray-400">
-            当前命中人设：<span className="text-white font-bold">{filteredPersonas.length}</span>
-          </div>
-          <div className="mb-2 text-xs text-gray-400">
-            当前已选标签：<span className="text-white font-bold">{selectedTagCount}</span>
-          </div>
-          <div className="flex flex-wrap gap-x-3 gap-y-1 mb-3">
-            {selectedProvenance.map((p) => (
-              <span key={p} className="text-[12px] font-semibold text-lime-300">
-                信源：{provenanceLabel[p]}
-              </span>
-            ))}
-            {Object.entries(selectedTagValues).map(([key, value]) => {
-              const field = allFieldMap.get(key);
-              if (!field || !value) return null;
-              return (
-                <span key={key} className="text-[12px] font-semibold text-primary">
-                  {field.label}：{value}
+        <div className="col-span-12 bg-surface p-4 rounded-xl overflow-visible">
+          <div className="mb-3">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <div className="text-sm font-bold text-gray-100">
+                当前命中人设：<span className="text-primary text-base font-extrabold tabular-nums">{filteredPersonas.length}</span>
+              </div>
+              <button
+                type="button"
+                onClick={clearAllFilters}
+                className="shrink-0 rounded bg-primary px-3 py-1 text-sm font-bold text-black hover:bg-primary/90 transition-colors"
+              >
+                取消筛选
+              </button>
+            </div>
+            <div className="mb-2 text-sm font-bold text-gray-100">
+              当前已选标签：<span className="text-primary text-base font-extrabold tabular-nums">{selectedTagCount}</span>
+            </div>
+            <div className="flex flex-wrap gap-x-3 gap-y-1">
+              {selectedProvenance.map((p) => (
+                <span key={p} className="text-[12px] font-semibold text-lime-300">
+                  信源：{provenanceLabel[p]}
                 </span>
-              );
-            })}
-            {selectedProvenance.length === 0 && Object.keys(selectedTagValues).length === 0 && (
-              <span className="text-[11px] text-gray-500">暂无筛选条件</span>
-            )}
+              ))}
+              {Object.entries(selectedTagValues).map(([key, value]) => {
+                const field = allFieldMap.get(key);
+                if (!field || !value) return null;
+                return (
+                  <span key={key} className="text-[12px] font-semibold text-primary">
+                    {field.label}：{value}
+                  </span>
+                );
+              })}
+              {selectedProvenance.length === 0 && Object.keys(selectedTagValues).length === 0 && (
+                <span className="text-[11px] text-gray-500">暂无筛选条件</span>
+              )}
+            </div>
           </div>
 
-          <div className="grid grid-cols-12 gap-2 items-center mb-3">
+          <div className="grid grid-cols-12 gap-2 items-center pb-3 mb-3 border-b border-white/10">
             <div className="col-span-2">
-              <span className="text-base font-bold text-white">信源筛选</span>
+              <p className="text-[12px] font-bold text-white leading-5">信源筛选</p>
             </div>
-            <div className="col-span-10 flex items-center gap-[3px]">
+            <div className="col-span-10 flex flex-wrap items-center gap-[3px] gap-y-1 text-[11px] text-gray-300 leading-5">
               {([
                 { id: 'first' as const, label: '一方' },
                 { id: 'third' as const, label: '三方' },
                 { id: 'deep_interview' as const, label: '深度访谈' },
-              ]).map((opt) => {
+              ]).map((opt, idx, arr) => {
                 const active = selectedProvenance.includes(opt.id);
                 return (
-                  <button
-                    key={opt.id}
-                    onClick={() => {
-                      setSelectedProvenance((prev) =>
-                        prev.includes(opt.id) ? prev.filter((x) => x !== opt.id) : [...prev, opt.id],
-                      );
-                    }}
-                    className={`text-[12px] transition-colors ${
-                      active
-                        ? 'text-primary font-semibold'
-                        : 'text-gray-300 hover:text-white'
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
+                  <span key={opt.id} className="inline-flex items-center shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedProvenance((prev) =>
+                          prev.includes(opt.id) ? prev.filter((x) => x !== opt.id) : [...prev, opt.id],
+                        );
+                      }}
+                      className={`text-[11px] leading-5 transition-colors ${
+                        active
+                          ? 'text-primary font-semibold'
+                          : 'text-gray-300 hover:text-white'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                    {idx < arr.length - 1 && <span className="mx-[3px] text-gray-500">/</span>}
+                  </span>
                 );
               })}
             </div>
           </div>
 
-          <p className="text-white text-base font-bold mb-3">标签筛选</p>
-          <div className="space-y-1.5 mb-3">
-            {filterSchema.map((group) => {
-              const isPoolOpen = activeTagPoolCategory === group.category;
-
-              return (
-                <div key={group.category} className="relative grid grid-cols-12 gap-2 items-center py-1">
-                  <div className="col-span-2">
-                    <p className="text-[12px] font-bold text-white leading-5">{group.category}</p>
-                  </div>
-
-                  <div
-                    className="col-span-10 flex items-center gap-[3px] text-[11px] text-gray-300 leading-5 truncate cursor-default"
-                    onMouseEnter={(e) => keepTagPoolOpen(group.category, e.currentTarget as HTMLElement)}
-                    onMouseLeave={scheduleCloseTagPool}
-                    title={group.fields.map((f) => f.label).join('/')}
-                  >
-                    {group.fields.map((f, idx) => (
-                      <span key={f.key} className="inline-flex items-center shrink-0">
-                        {f.label}
-                        {idx < group.fields.length - 1 && <span className="mx-[3px] text-gray-500">/</span>}
-                      </span>
-                    ))}
-                  </div>
-
-                  {isPoolOpen && (
-                    <div
-                      className="fixed z-30 bg-surface border border-white/10 rounded-lg p-3 shadow-2xl"
-                      style={{ top: tagPoolStyle.top, left: tagPoolStyle.left, width: tagPoolStyle.width }}
-                      onMouseEnter={() => keepTagPoolOpen(group.category)}
-                      onMouseLeave={scheduleCloseTagPool}
-                    >
-                      <p className="text-xs font-bold text-white mb-2">{group.category} 标签池</p>
-                      <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                        {group.fields.map((field) => {
-                          const currentValue = selectedTagValues[field.key] ?? '全部';
-                          return (
-                            <div key={field.key} className="grid grid-cols-12 gap-2 items-start">
-                              <div className="col-span-3 text-[11px] text-gray-400 pt-1">{field.label}</div>
-                              <div className="col-span-9 flex flex-wrap gap-x-3 gap-y-1">
-                                {['全部', ...field.options].map((opt) => {
-                                  const selected = currentValue === opt;
-                                  return (
-                                    <button
-                                      key={`${field.key}-${opt}`}
-                                      type="button"
-                                      onClick={() => {
-                                        setSelectedTagValues((prev) => {
-                                          if (opt === '全部') {
-                                            const next = { ...prev };
-                                            delete next[field.key];
-                                            return next;
-                                          }
-                                          return { ...prev, [field.key]: opt };
-                                        });
-                                      }}
-                                      className={`text-[11px] transition-colors ${
-                                        selected
-                                          ? 'text-primary'
-                                          : 'text-gray-300 hover:text-white'
-                                      }`}
-                                    >
-                                      {opt}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+          <div className="space-y-1.5">
+            {filterSchema.map((group) => (
+              <PersonaTagCategoryRow
+                key={group.category}
+                group={group}
+                isPoolOpen={activeTagPoolCategory === group.category}
+                selectedTagValues={selectedTagValues}
+                setSelectedTagValues={setSelectedTagValues}
+                onPoolEnter={keepTagPoolOpen}
+                onPoolLeave={scheduleCloseTagPool}
+              />
+            ))}
           </div>
-
-          <button
-            onClick={resetFilters}
-            className={`w-full px-4 py-2 text-xs font-bold rounded transition-colors ${
-              Object.keys(selectedTagValues).length === 0 && selectedProvenance.length === 0
-                ? 'bg-primary text-black'
-                : 'bg-surface-hover text-gray-300 hover:bg-[#2d2935]'
-            }`}
-          >
-            全部
-          </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-6">
-        {filteredPersonas.map((p) => (
-          <button
-            key={p.id}
-            onClick={() => setSelectedPersonaId(p.id)}
-            className="bg-surface p-6 rounded-xl relative group text-left hover:bg-surface-hover transition-colors"
-          >
-            <div className="absolute top-4 right-4">
-              <span className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[11px] font-bold ${provenanceBadgeClass[p.provenance]}`}>
-                {provenanceLabel[p.provenance]}
-              </span>
-            </div>
-            <h3 className="text-2xl font-bold text-white mb-3">{getPersonaAlias(p)}</h3>
-            <div className="flex gap-2 mb-8">
-              <span className="px-2 py-1 bg-blue-500/20 text-blue-400 text-xs rounded">{p.tags[0]}</span>
-              <span className="px-2 py-1 bg-surface-hover text-gray-300 text-xs rounded">{p.tags[1]}</span>
-            </div>
-            
-            <div className="space-y-4">
-              <div>
-                <div className="flex justify-between text-xs text-gray-400 mb-1">
-                  <span>综合评分</span>
-                  <span className="text-white font-bold text-lg">{p.score} <span className="text-gray-500 text-xs font-normal">/ 10</span></span>
+      <div className="space-y-6">
+        <div className="grid grid-cols-3 gap-6">
+          {safePersonaListPage === 1 && (
+            <button
+              type="button"
+              onClick={() => setIsCreateModalOpen(true)}
+              className="flex min-h-[240px] w-full flex-col items-center justify-center rounded-xl border-2 border-dashed border-white/10 text-gray-500 transition-colors hover:border-white/30 hover:text-white"
+            >
+              <Plus size={32} className="mb-2" />
+              <span className="text-sm font-bold">创建新的人设</span>
+            </button>
+          )}
+          {pagedPersonas.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => setSelectedPersonaId(p.id)}
+              className="bg-surface p-6 rounded-xl relative group text-left hover:bg-surface-hover transition-colors"
+            >
+              <div className="absolute top-4 right-4">
+                <span className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[11px] font-bold ${provenanceBadgeClass[p.provenance]}`}>
+                  {provenanceLabel[p.provenance]}
+                </span>
+              </div>
+              <h3 className="text-2xl font-bold text-white mb-3">{getPersonaAlias(p)}</h3>
+              <div className="mb-8 flex flex-wrap gap-2">
+                {p.tags.slice(0, 2).map((tag, idx) => (
+                  <span key={`${p.id}-tag-${idx}`} className={personaCardTagClass}>
+                    {tag}
+                  </span>
+                ))}
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <div className="mb-1 flex justify-between text-xs text-gray-400">
+                    <span>综合评分</span>
+                    <span className="text-lg font-bold text-white">
+                      {p.score} <span className="text-xs font-normal text-gray-500">/ 10</span>
+                    </span>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-surface-hover">
+                    <div className="h-full bg-primary" style={{ width: `${p.score * 10}%` }}></div>
+                  </div>
                 </div>
-                <div className="h-1.5 bg-surface-hover rounded-full overflow-hidden">
-                  <div className="h-full bg-primary" style={{ width: `${p.score * 10}%` }}></div>
+                <div>
+                  <div className="mb-1 flex justify-between text-xs text-gray-400">
+                    <span>置信度</span>
+                    <span className="text-lg font-bold text-white">{p.conf}%</span>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-surface-hover">
+                    <div className="h-full bg-primary" style={{ width: `${p.conf}%` }}></div>
+                  </div>
                 </div>
               </div>
-              <div>
-                <div className="flex justify-between text-xs text-gray-400 mb-1">
-                  <span>置信度</span>
-                  <span className="text-white font-bold text-lg">{p.conf}%</span>
-                </div>
-                <div className="h-1.5 bg-surface-hover rounded-full overflow-hidden">
-                  <div className="h-full bg-primary" style={{ width: `${p.conf}%` }}></div>
-                </div>
-              </div>
-            </div>
-          </button>
-        ))}
-        
-        <button 
-          onClick={() => setIsCreateModalOpen(true)}
-          className="bg-transparent border-2 border-dashed border-white/10 rounded-xl flex flex-col items-center justify-center text-gray-500 hover:text-white hover:border-white/30 transition-colors min-h-[280px]"
-        >
-          <Plus size={32} className="mb-2" />
-          <span className="text-sm font-bold">创建新的人设</span>
-        </button>
+            </button>
+          ))}
+        </div>
+
+        {personaListTotalPages > 1 && (
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <button
+              type="button"
+              disabled={safePersonaListPage <= 1}
+              onClick={() => setPersonaListPage((prev) => Math.max(1, prev - 1))}
+              className="rounded-lg border border-white/15 px-4 py-2 text-sm font-semibold text-gray-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              上一页
+            </button>
+            <span className="min-w-[7.5rem] text-center text-sm tabular-nums text-gray-400">
+              第 <span className="font-bold text-white">{safePersonaListPage}</span> / {personaListTotalPages} 页
+            </span>
+            <button
+              type="button"
+              disabled={safePersonaListPage >= personaListTotalPages}
+              onClick={() => setPersonaListPage((prev) => Math.min(personaListTotalPages, prev + 1))}
+              className="rounded-lg border border-white/15 px-4 py-2 text-sm font-semibold text-gray-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              下一页
+            </button>
+          </div>
+        )}
       </div>
 
-      <Modal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} title="上传 PDF 生成人设">
+      <Modal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} title="新增人设">
         <div className="space-y-4">
           <input
             ref={uploadRef}
