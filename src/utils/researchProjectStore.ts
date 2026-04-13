@@ -30,6 +30,7 @@ export type ChatMessageVariant =
   | 'domain_form'
   | 'topic_suggestions'
   | 'topic_confirmed_plan_card'
+  | 'outline_regenerate_card'
   | 'interview_content_ready';
 
 export type ChatMessage = {

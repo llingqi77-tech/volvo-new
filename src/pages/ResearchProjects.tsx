@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Archive, ArchiveRestore, ArrowLeft, Bot, Download, FileText, History, Plus, Search, Send, Share2 } from 'lucide-react';
+import { Archive, ArchiveRestore, ArrowLeft, Bot, BookmarkPlus, Check, Download, FileText, History, Plus, Search, Send, Share2 } from 'lucide-react';
 import { PersonaCdpTagFilterPanel } from '../components/PersonaCdpTagFilterPanel';
 import { PersonaDetailView } from '../components/PersonaDetailView';
 import { filterSchema } from '../data/personaFilterSchema';
@@ -20,6 +20,7 @@ import {
 } from '../utils/researchProjectStore';
 
 type EntryMode = 'insight' | 'projects';
+type RightPanelSection = 'plan' | 'persona' | 'outline' | 'interview' | 'report';
 
 /** 仅左侧全宽对话流、无右栏 */
 const FULL_WIDTH_CHAT_STAGES: ResearchProject['stage'][] = [
@@ -30,6 +31,33 @@ const FULL_WIDTH_CHAT_STAGES: ResearchProject['stage'][] = [
 ];
 
 const TIMELINE_STAGES = ['洞察搜索', '方案设计', '人群筛选', '大纲设计', '访谈执行', '报告生成'] as const;
+type TimelineStageLabel = typeof TIMELINE_STAGES[number];
+type HistoryStatusFilter = 'all' | 'unpublished' | 'published' | TimelineStageLabel;
+
+const STAGE_BADGE_LABELS: Record<ProjectStage, string> = {
+  intentClarify: '洞察搜索',
+  fullTimeSourceSelect: '洞察搜索',
+  fullDomainSourceSelect: '洞察搜索',
+  topicExplore: '洞察搜索',
+  plan: '方案设计',
+  persona: '人群筛选',
+  interviewOutline: '大纲设计',
+  interviewExecution: '访谈执行',
+  materialUpload: '报告生成',
+  report: '未发布',
+};
+
+function getHistoryStatusLabel(project: ResearchProject) {
+  if (project.archived) return '已发布';
+  return STAGE_BADGE_LABELS[project.stage];
+}
+
+function getHistoryStatusClass(label: string) {
+  if (label === '已发布') return 'bg-indigo-500/20 text-indigo-300';
+  if (label === '未发布') return 'border border-amber-500/30 bg-amber-500/10 text-amber-300';
+  if (TIMELINE_STAGES.includes(label as TimelineStageLabel)) return 'bg-emerald-500/20 text-emerald-300';
+  return 'bg-gray-500/20 text-gray-300';
+}
 
 function stageToTimelineIndex(stage: ProjectStage) {
   if (stage === 'plan') return 1;
@@ -137,6 +165,14 @@ function buildTopicReply(project: ResearchProject, userInput: string) {
     `当前建议主题：${refinedTopic}`,
     '',
     '如果你认同，可以直接确认该主题；如果你觉得还需要更聚焦，我可以继续把主题缩小到具体人群、场景或假设层面。',
+  ].join('\n');
+}
+
+function buildOutlineAdjustReply(userInput: string) {
+  return [
+    `已记录你对访谈大纲的调整意见：「${userInput}」。`,
+    '',
+    '我会将这轮补充合并进下一版访谈大纲结构，建议你再补充 1-2 条（如人群优先级、问题顺序、追问深度）后，再点击「生成访谈大纲」确认更新。',
   ].join('\n');
 }
 
@@ -529,15 +565,19 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
   const [newPrompt, setNewPrompt] = useState('');
   const [historyKeyword, setHistoryKeyword] = useState('');
   const [historySortOrder, setHistorySortOrder] = useState<'desc' | 'asc'>('desc');
-  const [historyArchiveFilter, setHistoryArchiveFilter] = useState<'all' | 'archived' | 'active'>('all');
+  const [historyArchiveFilter, setHistoryArchiveFilter] = useState<HistoryStatusFilter>('all');
   const [historyPage, setHistoryPage] = useState(1);
   const [topicChatInput, setTopicChatInput] = useState('');
   const [outlineDraft, setOutlineDraft] = useState('');
   const [personaFilterValues, setPersonaFilterValues] = useState<Record<string, string>>({});
+  const [rightPanelSection, setRightPanelSection] = useState<RightPanelSection>('report');
+  const [savedPersonaIds, setSavedPersonaIds] = useState<Set<string>>(new Set());
+  const [reviewTimelineIdx, setReviewTimelineIdx] = useState<number | null>(null);
   const [completedThinkingIds, setCompletedThinkingIds] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const interviewContentPanelRef = useRef<HTMLDivElement>(null);
+  const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const cdpFieldLabelMap = useMemo(
     () => new Map(filterSchema.flatMap((group) => group.fields.map((field) => [field.key, field.label] as const))),
@@ -557,9 +597,14 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
           keyword.length === 0 ||
           project.title.toLowerCase().includes(keyword) ||
           project.summary.toLowerCase().includes(keyword);
+        const statusLabel = getHistoryStatusLabel(project);
         const matchArchive =
           historyArchiveFilter === 'all' ||
-          (historyArchiveFilter === 'archived' ? project.archived : !project.archived);
+          (historyArchiveFilter === 'published'
+            ? project.archived
+            : historyArchiveFilter === 'unpublished'
+              ? !project.archived
+              : statusLabel === historyArchiveFilter);
         return matchKeyword && matchArchive;
       })
       .sort((a, b) => (historySortOrder === 'desc' ? b.updatedAt - a.updatedAt : a.updatedAt - b.updatedAt));
@@ -926,7 +971,17 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
 
   useEffect(() => {
     setCompletedThinkingIds(new Set());
+    setReviewTimelineIdx(null);
   }, [activeProjectId]);
+
+  useEffect(() => {
+    if (!activeProject) return;
+    if (activeProject.stage === 'plan') setRightPanelSection('plan');
+    else if (activeProject.stage === 'persona') setRightPanelSection('persona');
+    else if (activeProject.stage === 'interviewOutline') setRightPanelSection('outline');
+    else if (activeProject.stage === 'interviewExecution') setRightPanelSection('interview');
+    else if (activeProject.stage === 'report') setRightPanelSection('report');
+  }, [activeProject?.id, activeProject?.stage]);
 
   const createProject = () => {
     const prompt = newPrompt.trim();
@@ -1015,6 +1070,26 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
     () => activeProject?.prePersonaMessages.find((message) => message.role === 'assistant')?.id,
     [activeProject?.prePersonaMessages],
   );
+  const isReviewMode = reviewTimelineIdx !== null;
+
+  const timelineAnchors = useMemo(() => {
+    if (!activeProject) return [] as Array<string | null>;
+    const messages = activeProject.prePersonaMessages;
+    const findByText = (prefix: string) => messages.find((message) => message.text.startsWith(prefix))?.id ?? null;
+    const planAnchor =
+      messages.find((message) => message.variant === 'topic_confirmed_plan_card')?.id ??
+      messages.find((message) => message.text.includes('调研计划草案'))?.id ??
+      null;
+    const reportAnchor = messages[messages.length - 1]?.id ?? null;
+    return [
+      messages.find((message) => message.role === 'assistant')?.id ?? null,
+      planAnchor,
+      findByText('进入人群筛选') ?? findByText('已进入人群筛选'),
+      findByText('已进入访谈设计'),
+      findByText('已进入访谈执行'),
+      reportAnchor,
+    ];
+  }, [activeProject]);
 
   const sendTopicMessage = () => {
     if (!activeProject) return;
@@ -1034,6 +1109,35 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
         ...project,
         prePersonaMessages: [...project.prePersonaMessages, userMsg, asstMsg],
       }));
+      setTopicChatInput('');
+      return;
+    }
+
+    if (activeProject.stage === 'interviewOutline') {
+      const asstMsg: ChatMessage = {
+        id: `assistant-${t + 1}`,
+        role: 'assistant',
+        text: buildOutlineAdjustReply(userText),
+        createdAt: t + 1,
+      };
+      const noteMsg: ChatMessage = {
+        id: `outline-note-${t + 2}`,
+        role: 'assistant',
+        text: `已记录本轮大纲调整要点：${userText}。你可以继续补充，我会在右侧同步更新访谈大纲。`,
+        createdAt: t + 2,
+      };
+      updateProject(activeProject.id, (project) => {
+        const nextOutline = buildInterviewOutline(project);
+        return {
+          ...project,
+          interviewOutlineStage: {
+            ...project.interviewOutlineStage,
+            outline: nextOutline,
+            confirmed: false,
+          },
+          prePersonaMessages: [...project.prePersonaMessages, userMsg, asstMsg, noteMsg],
+        };
+      });
       setTopicChatInput('');
       return;
     }
@@ -1091,6 +1195,48 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
       })(),
     }));
     setTopicChatInput('');
+  };
+
+  const onUploadMaterials = (files: File[]) => {
+    if (!activeProject) return;
+    if (files.length === 0) return;
+    const maxBytes = 20 * 1024 * 1024;
+    const validFiles = files.filter((file) => file.size <= maxBytes && file.name.toLowerCase().endsWith('.pdf'));
+    if (validFiles.length === 0) return;
+    const uploaded: UploadedMaterial[] = validFiles.map((file) => ({
+      id: `file-${Date.now()}-${file.name}`,
+      name: file.name,
+      sizeLabel: formatBytes(file.size),
+      uploadedAt: Date.now(),
+    }));
+    updateProject(activeProject.id, (project) => ({
+      ...project,
+      materialUploadStage: {
+        ...project.materialUploadStage,
+        files: [...project.materialUploadStage.files, ...uploaded],
+        skipped: false,
+      },
+      prePersonaMessages: [
+        ...project.prePersonaMessages,
+        {
+          id: `upload-note-${Date.now()}`,
+          role: 'assistant',
+          text: `已上传 ${uploaded.length} 份线下资料，可继续补充或直接生成报告。`,
+          createdAt: Date.now(),
+        },
+      ],
+    }));
+  };
+
+  const onTimelineDotClick = (idx: number) => {
+    if (!activeProject) return;
+    const currentTimelineIdx = stageToTimelineIndex(activeProject.stage);
+    if (idx >= currentTimelineIdx) return;
+    const anchorId = timelineAnchors[idx];
+    if (!anchorId) return;
+    window.setTimeout(() => {
+      messageRefs.current[anchorId]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 30);
   };
 
   const onIntentOptionSelect = (question: ChoiceQuestion, option: string) => {
@@ -1249,12 +1395,17 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                 </button>
                 <select
                   value={historyArchiveFilter}
-                  onChange={(event) => setHistoryArchiveFilter(event.target.value as 'all' | 'archived' | 'active')}
+                  onChange={(event) => setHistoryArchiveFilter(event.target.value as HistoryStatusFilter)}
                   className="rounded-lg border border-white/40 bg-surface px-3 py-2.5 text-sm font-semibold text-white outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
                 >
                   <option value="all" className="bg-surface text-white">全部状态</option>
-                  <option value="active" className="bg-surface text-white">未发布</option>
-                  <option value="archived" className="bg-surface text-white">已发布</option>
+                  <option value="unpublished" className="bg-surface text-white">未发布</option>
+                  <option value="published" className="bg-surface text-white">已发布</option>
+                  {TIMELINE_STAGES.map((stage) => (
+                    <option key={stage} value={stage} className="bg-surface text-white">
+                      {stage}
+                    </option>
+                  ))}
                 </select>
                 <select
                   value={historySortOrder}
@@ -1278,6 +1429,10 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                       onClick={() => openHistoryProject(project.id)}
                       className="rounded-2xl border border-white/10 bg-surface p-5 text-left transition-colors hover:bg-surface-hover"
                     >
+                      {(() => {
+                        const statusLabel = getHistoryStatusLabel(project);
+                        return (
+                          <>
                       <div className="flex items-start justify-between gap-4">
                         <div className="min-w-0">
                           <h3 className="truncate text-lg font-bold text-white">{project.title}</h3>
@@ -1313,13 +1468,14 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                       </div>
                       <div className="mt-4 flex items-center justify-end">
                         <span
-                          className={`rounded-full px-2.5 py-1 text-[11px] ${
-                            project.archived ? 'bg-gray-500/20 text-gray-300' : 'border border-primary/30 bg-primary/15 text-primary'
-                          }`}
+                          className={`rounded-full px-2.5 py-1 text-[11px] ${getHistoryStatusClass(statusLabel)}`}
                         >
-                          {project.archived ? '已发布' : '未发布'}
+                          {statusLabel}
                         </span>
                       </div>
+                          </>
+                        );
+                      })()}
                     </button>
                   ))}
                 </div>
@@ -1445,7 +1601,183 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
     );
   }
 
+  function renderRightFilterBar() {
+    if (!activeProject?.planStage.plan) return null;
+    return (
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <select
+          value={rightPanelSection}
+          onChange={(event) => setRightPanelSection(event.target.value as RightPanelSection)}
+          disabled={isReviewMode}
+          className="rounded-lg border border-white/20 bg-surface px-3 py-2 text-sm text-white outline-none focus:border-primary disabled:opacity-50"
+        >
+          <option value="plan" className="bg-surface text-white">调研方案</option>
+          <option value="persona" className="bg-surface text-white">人设信息</option>
+          <option value="outline" className="bg-surface text-white">访谈大纲</option>
+          <option value="interview" className="bg-surface text-white">访谈内容</option>
+          <option value="report" className="bg-surface text-white">报告</option>
+        </select>
+      </div>
+    );
+  }
+
+  function renderRightPanelEmpty(text: string) {
+    return (
+      <div className="flex min-h-0 flex-1 items-center justify-center rounded-xl border border-white/10 bg-surface/40 p-6 text-center text-sm text-gray-400">
+        {text}
+      </div>
+    );
+  }
+
+  function openReportPreview(project: ResearchProject) {
+    const report = project.reportStage.report;
+    if (!report.trim()) return;
+    const safeTitle = `${project.topicExplore.confirmedTopic || project.title} 研究报告`;
+    const reportHtml = report
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\n/g, '<br/>');
+    const win = window.open('', '_blank');
+    if (!win) return;
+    win.document.write(`<!doctype html><html><head><meta charset="utf-8"/><title>${safeTitle}</title><style>body{margin:0;background:#f5f5f5;font-family:Arial,sans-serif;} .page{max-width:960px;margin:24px auto;background:#fff;padding:36px 42px;line-height:1.75;color:#18181b;box-shadow:0 8px 40px rgba(0,0,0,.08);} h1{margin:0 0 16px;font-size:28px;}</style></head><body><div class="page"><h1>${safeTitle}</h1><div>${reportHtml}</div></div></body></html>`);
+    win.document.close();
+    win.focus();
+  }
+
+  function renderCrossStagePanel() {
+    if (!activeProject) return null;
+    const hasAnyOutput =
+      Boolean(activeProject.planStage.plan) ||
+      activeProject.personaStage.personas.length > 0 ||
+      Boolean(activeProject.interviewOutlineStage.outline.trim()) ||
+      Object.keys(activeProject.interviewExecutionStage.transcripts).length > 0 ||
+      Boolean(activeProject.reportStage.report.trim());
+    if (!hasAnyOutput) {
+      return renderRightPanelEmpty('研究产出将在此展示');
+    }
+    if (rightPanelSection === 'plan') {
+      return activeProject.planStage.plan ? renderPlanRightColumn(activeProject) : renderRightPanelEmpty('调研方案尚未生成。');
+    }
+    if (rightPanelSection === 'persona') {
+      const list = activeProject.personaStage.personas;
+      if (list.length === 0) return renderRightPanelEmpty('人设信息尚未生成。');
+      return (
+        <div className="chat-scroll-area min-h-0 flex-1 overflow-y-auto">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+            {list.map((persona) => (
+              <button
+                key={persona.id}
+                type="button"
+                onClick={() =>
+                  updateProject(activeProject.id, (project) => ({
+                    ...project,
+                    personaStage: { ...project.personaStage, detailPersonaId: persona.id },
+                  }))
+                }
+                className="rounded-xl border border-white/10 bg-surface p-3 text-left hover:bg-white/5"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <h4 className="text-sm font-bold text-white">{persona.cardTitle}</h4>
+                  <span className="shrink-0 rounded-full px-2 py-0.5 text-[10px] bg-surface-hover text-gray-300">
+                    {persona.sourcePool === 'cdp' ? 'CDP' : persona.sourcePool === 'cdp_voc' ? 'CDP+VOC' : 'VOC'}
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {persona.tags.slice(0, 2).map((tag, tagIdx) => (
+                    <span key={`${persona.id}-${tag}-${tagIdx}`} className="rounded px-2 py-1 bg-surface-hover text-xs text-gray-300">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      );
+    }
+    if (rightPanelSection === 'outline') {
+      const outline = activeProject.interviewOutlineStage.outline || outlineDraft;
+      if (!outline.trim()) return renderRightPanelEmpty('访谈大纲尚未生成。');
+      return (
+        <div className="chat-scroll-area min-h-0 flex-1 overflow-y-auto rounded-2xl border border-white/10 bg-white p-8 text-black shadow-2xl">
+          <h4 className="text-2xl font-black">{activeProject.topicExplore.confirmedTopic || activeProject.title} 访谈大纲</h4>
+          <div className="mt-5 whitespace-pre-wrap text-sm leading-7 text-zinc-800">{outline}</div>
+        </div>
+      );
+    }
+    if (rightPanelSection === 'interview') {
+      const transcripts = activeProject.interviewExecutionStage.transcripts;
+      const ids = Object.keys(transcripts);
+      if (ids.length === 0) return renderRightPanelEmpty('访谈内容尚未生成。');
+      const currentId = activeProject.interviewExecutionStage.selectedPersonaId ?? ids[0];
+      const body = transcripts[currentId] ?? transcripts[ids[0]];
+      return (
+        <div className="chat-scroll-area min-h-0 flex-1 overflow-y-auto rounded-2xl border border-white/10 bg-white p-6 text-black shadow-2xl">
+          <div className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-800">{body}</div>
+        </div>
+      );
+    }
+    if (!activeProject.reportStage.report.trim()) return renderRightPanelEmpty('报告尚未生成。');
+    return (
+      <div className="chat-scroll-area min-h-0 flex-1 overflow-y-auto rounded-2xl border border-white/10 bg-white p-8 text-black shadow-2xl">
+        <h4 className="text-3xl font-black">{activeProject.topicExplore.confirmedTopic || activeProject.title} 研究报告</h4>
+        <p className="mt-2 text-sm text-zinc-500">生成时间：{formatProjectTime(activeProject.reportStage.generatedAt ?? Date.now())}</p>
+        <div className="mt-6 whitespace-pre-wrap text-sm leading-7 text-zinc-800">{activeProject.reportStage.report}</div>
+        <div className="mt-6 flex justify-end">
+          <button
+            type="button"
+            onClick={() => openReportPreview(activeProject)}
+            className="rounded-lg border border-primary/40 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10"
+          >
+            查看报告
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  function renderMaterialComposerBar() {
+    if (!activeProject) return null;
+    return (
+      <div className="rounded-xl border border-primary/30 bg-surface/90 p-3">
+        <p className="text-sm font-semibold text-white">上传线下访谈资料（PDF）</p>
+        <p className="mt-1 text-xs text-gray-400">支持多文件，单个不超过 20MB；也可直接跳过并生成报告。</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-black hover:bg-primary/90"
+          >
+            选择 PDF 文件
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              updateProject(activeProject.id, (project) => ({
+                ...project,
+                stage: 'report',
+                materialUploadStage: { ...project.materialUploadStage, skipped: true },
+              }))
+            }
+            className="rounded-lg border border-white/20 px-3 py-1.5 text-xs text-gray-200 hover:bg-white/5"
+          >
+            跳过并生成报告
+          </button>
+          <button
+            type="button"
+            onClick={() => updateProject(activeProject.id, (project) => ({ ...project, stage: 'report' }))}
+            className="rounded-lg border border-primary/40 px-3 py-1.5 text-xs text-primary hover:bg-primary/10"
+          >
+            继续生成最终报告
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   function renderTopicComposerBar() {
+    if (isReviewMode) return null;
     return (
       <div className="rounded-xl border border-primary/40 bg-surface/90 p-3 shadow-[0_0_0_1px_rgba(27,255,27,0.12)]">
         <textarea
@@ -1460,7 +1792,9 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
           rows={3}
           className="w-full resize-none bg-transparent text-sm text-white outline-none"
           placeholder={
-            activeProject.stage === 'interviewOutline'
+            activeProject.stage === 'report'
+              ? '继续输入你的需求...'
+              : activeProject.stage === 'interviewOutline'
               ? '继续输入你的想法，可完善并修改大纲'
               : activeProject.stage === 'interviewExecution'
                 ? '记录执行备注或现场补充（不自动改写已生成的访谈正文）…'
@@ -1581,7 +1915,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
           <SelectionQuestion
             title=""
             hideTitle
-            description={isActive ? '请选择一项' : '已完成选择（保留全部选项供回看）'}
+            description=""
             options={q.options}
             selected={answered}
             readOnly={!isActive}
@@ -1595,6 +1929,14 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
 
     if (message.role === 'user') {
       return null;
+    }
+
+    if (isReviewMode && message.variant && message.variant !== 'thinking') {
+      return (
+        <AssistantAvatarRow showIdentity={showIdentity}>
+          <StreamText text={message.text} pre className="whitespace-pre-wrap font-sans text-[12.5px] leading-[1.55] text-gray-300" />
+        </AssistantAvatarRow>
+      );
     }
 
     if (message.variant === 'thinking') {
@@ -1920,10 +2262,19 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                 onClick={() => goToPlanFromTopic(p.id, topicLine)}
                 className="w-full rounded-lg bg-primary py-2.5 text-sm font-bold text-black hover:bg-primary/90"
               >
-                生成调研计划
+                生成调研方案
               </button>
             </div>
           </div>
+        </AssistantAvatarRow>
+      );
+    }
+
+    if (message.variant === 'outline_regenerate_card') {
+      if (shouldWaitForPrevThinking) return null;
+      return (
+        <AssistantAvatarRow showIdentity={showIdentity}>
+          <AssistantTextCard text={`已记录本轮大纲调整要点：${message.text}。你可以继续补充，我会在右侧同步更新访谈大纲。`} />
         </AssistantAvatarRow>
       );
     }
@@ -2034,42 +2385,69 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                 {TIMELINE_STAGES.map((label, idx) => {
                   const isCurrent = idx === currentTimelineIdx;
                   const isDone = idx < currentTimelineIdx;
+                  const isFuture = idx > currentTimelineIdx;
                   return (
                     <div key={label} className="flex flex-1 items-center">
-                      <div className="flex min-w-[80px] flex-col items-center">
+                      <button
+                        type="button"
+                        onClick={() => onTimelineDotClick(idx)}
+                        disabled={idx >= currentTimelineIdx}
+                        className="flex min-w-[80px] flex-col items-center disabled:cursor-default"
+                      >
                         <span
                           className={`mb-1 whitespace-nowrap text-[11px] font-semibold ${
-                            isCurrent ? 'text-primary' : isDone ? 'text-gray-300' : 'text-gray-500'
+                            isCurrent ? 'text-purple-300' : isDone ? 'text-gray-200' : 'text-gray-500'
                           }`}
                         >
                           {label}
                         </span>
+                        {isDone ? (
+                          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-black shadow-[0_0_0_2px_rgba(27,255,27,0.15)]">
+                            <Check size={16} strokeWidth={3} />
+                          </div>
+                        ) : isCurrent ? (
+                          <div className="flex h-9 w-9 items-center justify-center rounded-full border border-purple-500/45 bg-purple-500/10 p-[3px] shadow-[0_0_0_2px_rgba(139,92,246,0.18)]">
+                            <div className="flex h-full w-full items-center justify-center rounded-full border border-purple-500/45 bg-purple-500/15 text-sm font-bold text-purple-300">
+                              {idx + 1}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-white/5 text-sm font-semibold text-gray-500">
+                            {idx + 1}
+                          </div>
+                        )}
+                      </button>
+                      {idx < TIMELINE_STAGES.length - 1 && (
                         <div
-                          className={`flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-bold ${
-                            isCurrent
-                              ? 'border-primary bg-primary/20 text-primary shadow-[0_0_0_2px_rgba(27,255,27,0.2)]'
-                              : isDone
-                                ? 'border-gray-500/70 bg-gray-500/20 text-gray-200'
-                                : 'border-white/20 bg-white/5 text-gray-500'
+                          className={`flex-1 ${
+                            isDone ? 'h-[2px] bg-primary/80' : 'h-0 border-t border-dashed border-white/20'
                           }`}
-                        >
-                          {idx + 1}
-                        </div>
-                      </div>
-                      {idx < TIMELINE_STAGES.length - 1 && <div className={`h-[2px] flex-1 ${isDone ? 'bg-gray-500/60' : 'bg-white/20'}`} />}
+                        />
+                      )}
                     </div>
                   );
                 })}
               </div>
             );
           })()}
-          <button
-            type="button"
-            onClick={exitProject}
-            className="shrink-0 rounded-lg border border-white/15 px-4 py-2 text-sm text-gray-200 hover:bg-white/5"
-          >
-            退出并稍后继续
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            {isReviewMode && (
+              <button
+                type="button"
+                onClick={() => setReviewTimelineIdx(null)}
+                className="rounded-lg border border-primary/40 px-3 py-2 text-xs text-primary hover:bg-primary/10"
+              >
+                返回当前阶段
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={exitProject}
+              className="rounded-lg border border-white/15 px-4 py-2 text-sm text-gray-200 hover:bg-white/5"
+            >
+              退出并稍后继续
+            </button>
+          </div>
         </div>
       </div>
 
@@ -2081,7 +2459,9 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
               className="chat-scroll-area min-h-0 flex-1 overflow-y-auto px-4 py-4 space-y-4"
             >
               {activeProject.prePersonaMessages.map((message, idx) => (
-                <div key={message.id}>{renderPrePersonaStreamMessage(message, idx)}</div>
+                <div key={message.id} ref={(node) => (messageRefs.current[message.id] = node)}>
+                  {renderPrePersonaStreamMessage(message, idx)}
+                </div>
               ))}
             </div>
             {activeProject.stage === 'topicExplore' && (
@@ -2089,9 +2469,8 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
             )}
           </div>
           <div className="chat-scroll-area relative min-w-0 basis-1/2 overflow-y-auto rounded-2xl border border-primary p-4 shadow-[0_0_0_1px_rgba(27,255,27,0.4),0_0_24px_rgba(27,255,27,0.15)]">
-            <div className="absolute left-3 top-3 flex h-10 w-10 items-center justify-center rounded-full border border-primary/40 bg-primary/10">
-              <Bot size={18} className="text-primary" />
-            </div>
+            {renderRightFilterBar()}
+            {renderCrossStagePanel()}
           </div>
         </div>
       ) : activeProject.stage === 'plan' ? (
@@ -2099,17 +2478,22 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
           <div className="flex min-w-0 basis-1/2 flex-col border-r border-white/10">
             <div ref={chatScrollRef} className="chat-scroll-area min-h-0 flex-1 overflow-y-auto px-4 py-4 space-y-4">
               {activeProject.prePersonaMessages.map((message, idx) => (
-                <div key={message.id}>{renderPrePersonaStreamMessage(message, idx)}</div>
+                <div key={message.id} ref={(node) => (messageRefs.current[message.id] = node)}>
+                  {renderPrePersonaStreamMessage(message, idx)}
+                </div>
               ))}
             </div>
             <div className="shrink-0 border-t border-white/10 p-4">{renderTopicComposerBar()}</div>
           </div>
           <div className="chat-scroll-area min-w-0 basis-1/2 overflow-y-auto rounded-2xl border border-primary p-4 shadow-[0_0_0_1px_rgba(27,255,27,0.4),0_0_24px_rgba(27,255,27,0.15)]">
-            <div className="flex h-full min-h-0 flex-col">
+            {renderRightFilterBar()}
+            {rightPanelSection === 'plan' ? (
+              <div className="flex h-full min-h-0 flex-col">
               <div className="chat-scroll-area min-h-0 flex-1 overflow-y-auto">{renderPlanRightColumn(activeProject)}</div>
               <div className="mt-4 flex shrink-0 justify-end gap-3">
                 <button
                   type="button"
+                  disabled={isReviewMode}
                   onClick={() =>
                     updateProject(activeProject.id, (project) => ({
                       ...project,
@@ -2117,12 +2501,15 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                       planStage: { ...project.planStage, confirmed: true },
                     }))
                   }
-                  className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90"
+                  className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   确认研究计划并进入人群筛选
                 </button>
               </div>
-            </div>
+              </div>
+            ) : (
+              renderCrossStagePanel()
+            )}
           </div>
         </div>
       ) : activeProject.stage === 'persona' ? (
@@ -2135,9 +2522,11 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                 return (
                   <>
                     {recentMessages.map((message, idx) => (
-                      <div key={message.id}>{renderPrePersonaStreamMessage(message, offset + idx)}</div>
+                      <div key={message.id} ref={(node) => (messageRefs.current[message.id] = node)}>
+                        {renderPrePersonaStreamMessage(message, offset + idx)}
+                      </div>
                     ))}
-                    <div className="rounded-2xl border border-white/10 bg-surface/40 p-3">
+                    <div className={`rounded-2xl border border-white/10 bg-surface/40 p-3 ${isReviewMode ? 'pointer-events-none opacity-60' : ''}`}>
                       <PersonaCdpTagFilterPanel selectedTagValues={personaFilterValues} onChange={setPersonaFilterValues} />
                       {Object.keys(personaFilterValues).length > 0 && (
                         <div className="mt-3 flex flex-wrap gap-2">
@@ -2150,6 +2539,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                       )}
                       <button
                         type="button"
+                        disabled={isReviewMode}
                         onClick={() => {
                           const built = buildPersonaCandidates(activeProject, personaFilterValues);
                           updateProject(activeProject.id, (project) => ({
@@ -2165,7 +2555,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                             },
                           }));
                         }}
-                        className="mt-3 w-full rounded-lg bg-primary py-2 text-sm font-bold text-black hover:bg-primary/90"
+                        className="mt-3 w-full rounded-lg bg-primary py-2 text-sm font-bold text-black hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         应用并生成新人设
                       </button>
@@ -2176,6 +2566,8 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
             </div>
           </div>
           <div className="flex min-h-0 min-w-0 flex-1 basis-1/2 flex-col overflow-hidden rounded-2xl border border-primary p-4 shadow-[0_0_0_1px_rgba(27,255,27,0.4),0_0_24px_rgba(27,255,27,0.15)]">
+            {renderRightFilterBar()}
+            {rightPanelSection === 'persona' ? (
             <div className="chat-scroll-area min-h-0 flex-1 overflow-y-auto">
               <p className="mb-3 text-sm text-gray-400">
                 {(() => {
@@ -2205,52 +2597,81 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
               ) : (
                 <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
                   {activeProject.personaStage.personas.map((persona) => (
-                    <button
+                    <div
                       key={persona.id}
-                      type="button"
+                      role="button"
+                      tabIndex={0}
                       onClick={() =>
                         updateProject(activeProject.id, (project) => ({
                           ...project,
                           personaStage: { ...project.personaStage, detailPersonaId: persona.id },
                         }))
                       }
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          updateProject(activeProject.id, (project) => ({
+                            ...project,
+                            personaStage: { ...project.personaStage, detailPersonaId: persona.id },
+                          }));
+                        }
+                      }}
                       className="rounded-xl border border-white/10 bg-surface p-3 text-left hover:bg-white/5"
                     >
                       <div className="flex items-start justify-between gap-2">
                         <h4 className="text-sm font-bold text-white">{persona.cardTitle}</h4>
-                        <span
-                          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] ${
-                            persona.sourcePool === 'cdp'
-                              ? 'bg-primary/15 text-primary'
-                              : persona.sourcePool === 'cdp_voc'
-                                ? 'bg-indigo-500/20 text-indigo-300'
-                                : 'bg-blue-500/15 text-blue-300'
-                          }`}
-                        >
-                          {persona.sourcePool === 'cdp' ? 'CDP' : persona.sourcePool === 'cdp_voc' ? 'CDP+VOC' : 'VOC'}
-                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            disabled={isReviewMode}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setSavedPersonaIds((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(persona.id)) next.delete(persona.id);
+                                else next.add(persona.id);
+                                return next;
+                              });
+                            }}
+                            className="rounded border border-white/20 p-1 text-gray-300 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                            title={savedPersonaIds.has(persona.id) ? '已加入人设库' : '加入人设库'}
+                          >
+                            <BookmarkPlus size={12} className={savedPersonaIds.has(persona.id) ? 'text-primary' : ''} />
+                          </button>
+                          <span
+                            className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] ${
+                              persona.sourcePool === 'cdp'
+                                ? 'bg-primary/15 text-primary'
+                                : persona.sourcePool === 'cdp_voc'
+                                  ? 'bg-indigo-500/20 text-indigo-300'
+                                  : 'bg-blue-500/15 text-blue-300'
+                            }`}
+                          >
+                            {persona.sourcePool === 'cdp' ? 'CDP' : persona.sourcePool === 'cdp_voc' ? 'CDP+VOC' : 'VOC'}
+                          </span>
+                        </div>
                       </div>
                       <div className="mt-2 flex flex-wrap gap-2">
                         {persona.tags.slice(0, 2).map((tag, tagIdx) => (
                           <span
                             key={`${persona.id}-${tag}-${tagIdx}`}
                             className={
-                              tagIdx === 0
-                                ? 'rounded px-2 py-1 bg-blue-500/20 text-xs text-blue-400'
-                                : 'rounded px-2 py-1 bg-surface-hover text-xs text-gray-300'
+                              'rounded px-2 py-1 bg-surface-hover text-xs text-gray-300'
                             }
                           >
                             {tag}
                           </span>
                         ))}
                       </div>
-                    </button>
+                      {savedPersonaIds.has(persona.id) && <p className="mt-2 text-[11px] text-primary">已加入人设库</p>}
+                    </div>
                   ))}
                 </div>
               )}
               <div className="mt-6 flex justify-end">
                 <button
                   type="button"
+                  disabled={isReviewMode}
                   onClick={() =>
                     updateProject(activeProject.id, (project) => ({
                       ...project,
@@ -2258,12 +2679,15 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                       personaStage: { ...project.personaStage, confirmed: true },
                     }))
                   }
-                  className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90"
+                  className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   确认这 {activeProject.personaStage.personas.length} 个人设并生成访谈大纲
                 </button>
               </div>
             </div>
+            ) : (
+              renderCrossStagePanel()
+            )}
           </div>
         </div>
       ) : activeProject.stage === 'interviewOutline' ? (
@@ -2271,12 +2695,19 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
           <div className="flex min-h-0 min-w-0 flex-1 basis-1/2 flex-col border-r border-white/10">
             <div ref={chatScrollRef} className="chat-scroll-area min-h-0 flex-1 overflow-y-auto px-3 py-4 space-y-3">
               {activeProject.prePersonaMessages.map((message, idx) => (
-                <div key={message.id}>{renderPrePersonaStreamMessage(message, idx)}</div>
+                <div key={message.id} ref={(node) => (messageRefs.current[message.id] = node)}>
+                  {renderPrePersonaStreamMessage(message, idx)}
+                </div>
               ))}
             </div>
             <div className="shrink-0 border-t border-white/10 p-4">{renderTopicComposerBar()}</div>
           </div>
           <div className="chat-scroll-area flex min-h-0 min-w-0 flex-1 basis-1/2 flex-col overflow-y-auto rounded-2xl border border-primary p-4 shadow-[0_0_0_1px_rgba(27,255,27,0.4),0_0_24px_rgba(27,255,27,0.15)]">
+            {renderRightFilterBar()}
+            {rightPanelSection !== 'outline' ? (
+              renderCrossStagePanel()
+            ) : (
+            <>
             <div className="chat-scroll-area min-h-0 flex-1 overflow-y-auto rounded-2xl border border-white/10 bg-white p-8 text-black shadow-2xl">
               <div className="border-b border-zinc-200 pb-4">
                 <div className="flex items-center justify-between gap-3">
@@ -2319,11 +2750,14 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                     interviewOutlineStage: { outline: outlineDraft, confirmed: true },
                   }))
                 }
-                className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90"
+                disabled={isReviewMode}
+                className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 确认访谈大纲并进入访谈执行
               </button>
             </div>
+            </>
+            )}
           </div>
         </div>
       ) : activeProject.stage === 'interviewExecution' ? (
@@ -2331,7 +2765,9 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
           <div className="flex min-h-0 min-w-0 flex-1 basis-1/2 flex-col overflow-hidden border-r border-white/10">
             <div ref={chatScrollRef} className="chat-scroll-area min-h-0 flex-1 overflow-y-auto px-3 py-4 space-y-3">
               {activeProject.prePersonaMessages.map((message, idx) => (
-                <div key={message.id}>{renderPrePersonaStreamMessage(message, idx)}</div>
+                <div key={message.id} ref={(node) => (messageRefs.current[message.id] = node)}>
+                  {renderPrePersonaStreamMessage(message, idx)}
+                </div>
               ))}
             </div>
             <div className="shrink-0 border-t border-white/10 bg-background p-4">
@@ -2342,7 +2778,11 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
             ref={interviewContentPanelRef}
             className="flex min-h-0 min-w-0 flex-1 basis-1/2 flex-col overflow-hidden rounded-2xl border border-primary p-4 shadow-[0_0_0_1px_rgba(27,255,27,0.4),0_0_24px_rgba(27,255,27,0.15)]"
           >
-            {(() => {
+            {renderRightFilterBar()}
+            {rightPanelSection !== 'interview' ? (
+              renderCrossStagePanel()
+            ) : (
+            (() => {
               const tabPersonas = activeProject.personaStage.personas.filter((persona) =>
                 activeProject.personaStage.selectedPersonaIds.includes(persona.id),
               );
@@ -2397,6 +2837,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                           <button
                             key={persona.id}
                             type="button"
+                            disabled={isReviewMode}
                             onClick={() =>
                               updateProject(activeProject.id, (project) => ({
                                 ...project,
@@ -2406,7 +2847,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                                 },
                               }))
                             }
-                            className={`min-w-0 truncate rounded-lg border px-2 py-1.5 text-center text-xs font-semibold transition-colors ${
+                            className={`min-w-0 truncate rounded-lg border px-2 py-1.5 text-center text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                               isOn
                                 ? 'border-primary bg-primary/20 text-primary'
                                 : 'border-white/15 bg-white/5 text-gray-300 hover:bg-white/10'
@@ -2422,153 +2863,109 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                   <div className="mt-4 flex shrink-0 justify-end">
                     <button
                       type="button"
+                      disabled={isReviewMode}
                       onClick={() =>
                         updateProject(activeProject.id, (project) => ({
                           ...project,
                           stage: 'materialUpload',
                         }))
                       }
-                      className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90"
+                      className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       继续补充资料并生成报告
                     </button>
                   </div>
                 </>
               );
-            })()}
+            })()
+            )}
           </div>
         </div>
-      ) : (
-        <div className="flex-1 overflow-y-auto p-8">
-          <div className="mx-auto max-w-6xl space-y-6">
-            {activeProject.stage === 'materialUpload' && (
+      ) : activeProject.stage === 'materialUpload' || activeProject.stage === 'report' ? (
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            multiple
+            accept=".pdf,application/pdf"
+            onChange={(event) => {
+              const files = Array.from(event.target.files ?? []);
+              onUploadMaterials(files);
+              event.target.value = '';
+            }}
+          />
+          <div className="flex min-h-0 min-w-0 flex-1 basis-1/2 flex-col overflow-hidden border-r border-white/10">
+            <div ref={chatScrollRef} className="chat-scroll-area min-h-0 flex-1 overflow-y-auto px-3 py-4 space-y-3">
+              {activeProject.prePersonaMessages.map((message, idx) => (
+                <div key={message.id} ref={(node) => (messageRefs.current[message.id] = node)}>
+                  {renderPrePersonaStreamMessage(message, idx)}
+                </div>
+              ))}
+            </div>
+            <div className="shrink-0 border-t border-white/10 bg-background p-4">
+              {activeProject.stage === 'materialUpload' ? renderMaterialComposerBar() : renderTopicComposerBar()}
+            </div>
+          </div>
+          <div className="flex min-h-0 min-w-0 flex-1 basis-1/2 flex-col overflow-hidden rounded-2xl border border-primary p-4 shadow-[0_0_0_1px_rgba(27,255,27,0.4),0_0_24px_rgba(27,255,27,0.15)]">
+            {renderRightFilterBar()}
+            {rightPanelSection !== 'report' ? (
+              renderCrossStagePanel()
+            ) : (
               <>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  className="hidden"
-                  multiple
-                  accept=".pdf,application/pdf"
-                  onChange={(event) => {
-                    const files = Array.from(event.target.files ?? []);
-                    if (files.length === 0) return;
-                    const maxBytes = 20 * 1024 * 1024;
-                    const validFiles = files.filter((file) => file.size <= maxBytes && file.name.toLowerCase().endsWith('.pdf'));
-                    if (validFiles.length === 0) {
-                      event.target.value = '';
-                      return;
-                    }
-                    const uploaded: UploadedMaterial[] = validFiles.map((file) => ({
-                      id: `file-${Date.now()}-${file.name}`,
-                      name: file.name,
-                      sizeLabel: formatBytes(file.size),
-                      uploadedAt: Date.now(),
-                    }));
-                    updateProject(activeProject.id, (project) => ({
-                      ...project,
-                      materialUploadStage: {
-                        ...project.materialUploadStage,
-                        files: [...project.materialUploadStage.files, ...uploaded],
-                        skipped: false,
-                      },
-                    }));
-                    event.target.value = '';
-                  }}
-                />
-                <div
-                  onClick={() => fileInputRef.current?.click()}
-                  className="cursor-pointer rounded-2xl border-2 border-dashed border-white/20 bg-surface p-10 text-center transition-colors hover:border-primary/50"
-                >
-                  <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full border border-primary/40 bg-primary/10">
-                    <FileText size={16} className="text-primary" />
-                  </div>
-                  <p className="text-sm font-semibold text-white">上传线下访谈资料</p>
-                  <p className="mt-1 text-xs text-gray-400">支持多个 PDF 同时上传（最大 20MB/个）</p>
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      fileInputRef.current?.click();
-                    }}
-                    className="mt-4 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90"
-                  >
-                    选择 PDF 文件
-                  </button>
-                </div>
-                {activeProject.materialUploadStage.files.map((file) => (
-                  <div
-                    key={file.id}
-                    className="flex items-center justify-between rounded-xl border border-white/10 bg-surface p-4 text-sm"
-                  >
-                    <div>
-                      <p className="font-medium text-white">{file.name}</p>
-                      <p className="text-xs text-gray-500">
-                        {file.sizeLabel} · {formatProjectTime(file.uploadedAt)}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-                <div className="flex justify-end gap-3">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      updateProject(activeProject.id, (project) => ({
-                        ...project,
-                        stage: 'report',
-                        materialUploadStage: { ...project.materialUploadStage, skipped: true },
-                      }))
-                    }
-                    className="rounded-lg border border-white/15 px-4 py-2 text-sm text-gray-200 hover:bg-white/5"
-                  >
-                    跳过并生成报告
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => updateProject(activeProject.id, (project) => ({ ...project, stage: 'report' }))}
-                    className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90"
-                  >
-                    继续生成最终报告
-                  </button>
-                </div>
-              </>
-            )}
-
-            {activeProject.stage === 'report' && (
-              <>
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xl font-extrabold text-white">最终研究报告</h3>
-                  <button
-                    type="button"
-                    onClick={() => shareProject(activeProject)}
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-white/15 text-gray-200 hover:bg-white/5"
-                    title="分享"
-                    aria-label="分享"
-                  >
-                    <Share2 size={16} />
-                  </button>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-white p-8 text-black shadow-2xl">
-                  <div className="border-b border-zinc-200 pb-4">
+                <div className="chat-scroll-area min-h-0 flex-1 overflow-y-auto rounded-2xl border border-white/10 bg-white p-8 text-black shadow-2xl">
+                  <div className="flex items-center justify-between border-b border-zinc-200 pb-4">
                     <div className="flex items-center gap-2 text-sm text-zinc-600">
                       <FileText className="h-4 w-4" />
                       PDF 风格预览
                     </div>
-                    <h4 className="mt-3 text-3xl font-black">
-                      {activeProject.topicExplore.confirmedTopic || activeProject.title} 研究报告
-                    </h4>
-                    <p className="mt-2 text-sm text-zinc-500">
-                      生成时间：{formatProjectTime(activeProject.reportStage.generatedAt ?? Date.now())}
-                    </p>
+                    <button
+                      type="button"
+                      onClick={() => shareProject(activeProject)}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-300 text-zinc-700 hover:bg-zinc-100"
+                      title="分享"
+                      aria-label="分享"
+                    >
+                      <Share2 size={14} />
+                    </button>
                   </div>
-                  <div className="mt-6 whitespace-pre-wrap text-sm leading-7 text-zinc-800">
-                    {activeProject.reportStage.report}
-                  </div>
+                  {activeProject.stage === 'materialUpload' ? (
+                    <div className="mt-5 space-y-3">
+                      {activeProject.materialUploadStage.files.length === 0 ? (
+                        <p className="text-sm text-zinc-500">尚未上传资料。请在左侧上传 PDF，或跳过后直接生成报告。</p>
+                      ) : (
+                        activeProject.materialUploadStage.files.map((file) => (
+                          <div key={file.id} className="rounded-lg border border-zinc-200 p-3">
+                            <p className="text-sm font-semibold text-zinc-900">{file.name}</p>
+                            <p className="mt-1 text-xs text-zinc-500">{file.sizeLabel} · {formatProjectTime(file.uploadedAt)}</p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <h4 className="mt-4 text-3xl font-black">{activeProject.topicExplore.confirmedTopic || activeProject.title} 研究报告</h4>
+                      <p className="mt-2 text-sm text-zinc-500">生成时间：{formatProjectTime(activeProject.reportStage.generatedAt ?? Date.now())}</p>
+                      <div className="mt-6 whitespace-pre-wrap text-sm leading-7 text-zinc-800">{activeProject.reportStage.report}</div>
+                    </>
+                  )}
                 </div>
+                {activeProject.stage === 'report' && activeProject.reportStage.report.trim() && (
+                  <div className="mt-3 flex shrink-0 justify-end">
+                    <button
+                      type="button"
+                      onClick={() => openReportPreview(activeProject)}
+                      className="rounded-lg border border-primary/40 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10"
+                    >
+                      查看报告
+                    </button>
+                  </div>
+                )}
               </>
             )}
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
