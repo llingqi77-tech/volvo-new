@@ -1777,6 +1777,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
 
   function renderRightFilterBar() {
     if (!activeProject?.planStage.plan) return null;
+    const canOpenReport = activeProject.stage === 'report' && rightPanelSection === 'report' && activeProject.reportStage.report.trim();
     return (
       <div className="mb-3 flex items-center justify-between gap-3">
         <select
@@ -1791,6 +1792,15 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
           <option value="interview" className="bg-surface text-white">访谈内容</option>
           <option value="report" className="bg-surface text-white">报告</option>
         </select>
+        {canOpenReport ? (
+          <button
+            type="button"
+            onClick={() => openReportPreview(activeProject)}
+            className="rounded-lg border border-primary/40 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10"
+          >
+            查看报告
+          </button>
+        ) : null}
       </div>
     );
   }
@@ -3104,17 +3114,6 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
               renderCrossStagePanel()
             ) : (
               <>
-                {activeProject.stage === 'report' && activeProject.reportStage.report.trim() && (
-                  <div className="mb-3 flex shrink-0 justify-end">
-                    <button
-                      type="button"
-                      onClick={() => openReportPreview(activeProject)}
-                      className="rounded-lg border border-primary/40 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10"
-                    >
-                      查看报告
-                    </button>
-                  </div>
-                )}
                 <div className="chat-scroll-area min-h-0 flex-1 overflow-y-auto rounded-2xl border border-white/10 bg-white p-8 text-black shadow-2xl">
                   <div className="flex items-center justify-between border-b border-zinc-200 pb-4">
                     <div className="flex items-center gap-2 text-sm text-zinc-600">

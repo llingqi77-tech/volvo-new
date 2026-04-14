@@ -449,12 +449,6 @@ function DocumentDetail({ doc, onBack, onDelete }: { doc: KnowledgeDoc; onBack: 
             <Download size={16} />
             下载
           </button>
-          <button
-            onClick={handleDelete}
-            className="px-4 py-2 bg-surface hover:bg-red-500/20 rounded flex items-center gap-2 text-sm text-gray-300 hover:text-red-400 transition-colors"
-          >
-            删除
-          </button>
         </div>
       </div>
 
