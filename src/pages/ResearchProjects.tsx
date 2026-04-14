@@ -3,15 +3,25 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Archive, ArchiveRestore, ArrowLeft, Bot, BookmarkPlus, Check, Download, FileText, History, Plus, Search, Send, Share2 } from 'lucide-react';
 import { PersonaCdpTagFilterPanel } from '../components/PersonaCdpTagFilterPanel';
 import { PersonaDetailView } from '../components/PersonaDetailView';
-import { filterSchema } from '../data/personaFilterSchema';
+import {
+  RADAR_TIER_MAX,
+  getPersonaAlias,
+  provenanceBadgeClass,
+  provenanceLabel,
+  radarChartLabels,
+  radarValuesToTiers,
+  sumRadarTiers,
+} from '../utils/personaDisplay';
 import {
   createEmptyProject,
+  defaultIntentQuestions,
   formatProjectTime,
   readResearchProjects,
   type ChatMessage,
   type ChatMessageVariant,
   type ChoiceQuestion,
   type InterviewPersona,
+  type PersonaProvenance,
   type ResearchPlan,
   type ResearchProject,
   type UploadedMaterial,
@@ -19,8 +29,20 @@ import {
   writeResearchProjects,
 } from '../utils/researchProjectStore';
 
+const PERSONA_CARD_TAG_CLASS = 'px-2 py-1 bg-surface-hover text-gray-300 text-xs rounded';
+
 type EntryMode = 'insight' | 'projects';
 type RightPanelSection = 'plan' | 'persona' | 'outline' | 'interview' | 'report';
+type VolvoPresetDimension = '产品创新' | '新品测试' | '竞品分析' | '用户旅程研究';
+type VolvoPresetCase = {
+  id: string;
+  title: string;
+  dimension: VolvoPresetDimension;
+  audience: string;
+  objective: string;
+  scenario: string;
+  deliverables: string[];
+};
 
 /** 仅左侧全宽对话流、无右栏 */
 const FULL_WIDTH_CHAT_STAGES: ResearchProject['stage'][] = [
@@ -119,7 +141,6 @@ function buildSourceSummary(project: ResearchProject) {
       ? '全时洞察：完全不选'
       : `全时洞察：${[
           project.fullTimeSource.knowledgeScopes.insightReport ? '洞察报告库' : '',
-          project.fullTimeSource.knowledgeScopes.vehicleKnowledge ? '整车知识库' : '',
           project.fullTimeSource.knowledgeScopes.industryKnowledge ? '行业知识库' : '',
         ]
           .filter(Boolean)
@@ -216,14 +237,18 @@ function hashStringToInt(s: string) {
   return s.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
 }
 
-function buildPersonaCandidates(project: ResearchProject, tagOverrides: Record<string, string>) {
+function buildPersonaCandidates(
+  project: ResearchProject,
+  tagOverrides: Record<string, string>,
+  provenanceFilter: PersonaProvenance[] = [],
+) {
   const topic = project.topicExplore.confirmedTopic || project.initialPrompt || project.title;
   const total = 10 + (hashStringToInt(project.id) % 11);
   const cdpBase = project.fullTimeSource.mode === 'skip' && project.fullDomainSource.mode === 'skip' ? 8 : 12;
   const cdpCount = Math.min(cdpBase, total);
   const supplementCount = total - cdpCount;
   const hintTags = Object.values(tagOverrides);
-  const personas: InterviewPersona[] = Array.from({ length: total }, (_, idx) => {
+  let personas: InterviewPersona[] = Array.from({ length: total }, (_, idx) => {
     const social = idx >= cdpCount;
     const names = ['陈思远', '林沐然', '周祺', '许悠然', '张逸豪', '宋致远', '李嘉禾', '赵以宁', '王若晨', '郑知夏'];
     const titles = ['极客小远', '精致小林', '奶爸小周', '极简悠然', 'Z代小张', '口碑小宋', '白领嘉禾', '新锐以宁', '务实若晨', '理性知夏'];
@@ -250,11 +275,20 @@ function buildPersonaCandidates(project: ResearchProject, tagOverrides: Record<s
         ? `我在讨论“${topic.slice(0, 14) || '当前主题'}”时，更在意真实体验、情绪共鸣与可被验证的细节。`
         : `围绕“${topic.slice(0, 14) || '当前主题'}”，我会同时考虑功能价值、使用场景与品牌可信度。`,
       radar: pickRadar(idx + 3),
-      provenance: social ? (idx % 2 === 0 ? 'third' : 'deep_interview') : 'first',
+      provenance: social ? 'deep_interview' : 'first',
       sourcePool,
     };
   });
-  return { personas, matchedFromCdp: cdpCount, supplementedFromSocial: supplementCount };
+  if (provenanceFilter.length > 0) {
+    personas = personas.filter((persona) => provenanceFilter.includes(persona.provenance));
+  }
+  const matchedFromCdp = personas.filter((persona) => persona.sourcePool === 'cdp').length;
+  const supplementedFromSocial = personas.length - matchedFromCdp;
+  return { personas, matchedFromCdp, supplementedFromSocial };
+}
+
+function getRadarTotal(radar: number[]) {
+  return sumRadarTiers(radarValuesToTiers(radar));
 }
 
 function buildInterviewOutline(project: ResearchProject) {
@@ -393,6 +427,45 @@ function timeRangeLabel(value: ResearchProject['fullDomainSource']['timeRange'])
       return '近一年';
   }
 }
+
+const VOLVO_PRESET_CASES: VolvoPresetCase[] = [
+  {
+    id: 'volvo-innovation-family-suv',
+    title: 'EX90 家庭安全体验升级创新',
+    dimension: '产品创新',
+    audience: '一线/新一线中高净值家庭用户',
+    objective: '挖掘安全、智能座舱与亲子场景的创新机会，沉淀下一代功能路线图',
+    scenario: '围绕「家庭出行 + 周末长途 + 城市通勤」三类高频场景定义创新优先级',
+    deliverables: ['机会地图', '创新功能优先级', '分人群价值主张', '迭代建议清单'],
+  },
+  {
+    id: 'volvo-newtest-ev-sedan',
+    title: '新款纯电轿车概念内测验证',
+    dimension: '新品测试',
+    audience: '25-40 岁城市科技/品质取向购车人群',
+    objective: '验证新车型在设计、续航、智能化与价格锚点上的接受度',
+    scenario: '通过概念图与功能脚本测试潜在用户的首购/换购意愿和阻碍因素',
+    deliverables: ['接受度评分', '关键阻碍清单', '价格带建议', '上市前优化方向'],
+  },
+  {
+    id: 'volvo-competitor-bba-nev',
+    title: '沃尔沃 vs BBA 新能源竞品对比',
+    dimension: '竞品分析',
+    audience: '豪华新能源关注人群与已购豪华品牌车主',
+    objective: '比较品牌认知、购买决策驱动与转化阻力，识别可突破的竞争位势',
+    scenario: '对比沃尔沃与 BBA 新能源车型在安全、智能、豪华体验上的感知差异',
+    deliverables: ['竞品对比矩阵', '差异化主张', '转化障碍路径', '传播策略建议'],
+  },
+  {
+    id: 'volvo-journey-omni-touchpoint',
+    title: '沃尔沃全链路用户旅程研究',
+    dimension: '用户旅程研究',
+    audience: '从初次关注到购后复购/推荐的完整用户链路',
+    objective: '诊断线上线下触点断点，优化从认知到成交再到售后的体验闭环',
+    scenario: '覆盖「内容触达-试驾-成交-交付-售后-车主社群」六阶段体验与情绪变化',
+    deliverables: ['旅程地图', '痛点优先级', '触点改进方案', '跨部门协同建议'],
+  },
+];
 
 function SelectionQuestion({
   title,
@@ -570,6 +643,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
   const [topicChatInput, setTopicChatInput] = useState('');
   const [outlineDraft, setOutlineDraft] = useState('');
   const [personaFilterValues, setPersonaFilterValues] = useState<Record<string, string>>({});
+  const [selectedPersonaProvenance, setSelectedPersonaProvenance] = useState<PersonaProvenance[]>([]);
   const [rightPanelSection, setRightPanelSection] = useState<RightPanelSection>('report');
   const [savedPersonaIds, setSavedPersonaIds] = useState<Set<string>>(new Set());
   const [reviewTimelineIdx, setReviewTimelineIdx] = useState<number | null>(null);
@@ -578,11 +652,6 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const interviewContentPanelRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
-
-  const cdpFieldLabelMap = useMemo(
-    () => new Map(filterSchema.flatMap((group) => group.fields.map((field) => [field.key, field.label] as const))),
-    [],
-  );
 
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId) ?? null,
@@ -997,6 +1066,112 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
     setNewPrompt('');
   };
 
+  const createPresetProject = (preset: VolvoPresetCase) => {
+    const seedPrompt = `${preset.title}｜${preset.objective}｜目标客户：${preset.audience}`;
+    const base = createEmptyProject(seedPrompt);
+    const now = Date.now();
+    const questions = defaultIntentQuestions(seedPrompt);
+    const answers: Record<string, string[]> = {
+      [questions[0]?.id ?? 'intent-goal']: [preset.dimension === '新品测试' ? '验证某个产品/营销假设' : preset.dimension === '竞品分析' ? '评估人群差异与优先级' : '寻找新增机会点'],
+      [questions[1]?.id ?? 'intent-audience']: ['潜在购车用户'],
+      [questions[2]?.id ?? 'intent-output']: ['沉淀最终洞察与报告'],
+    };
+
+    const topicProject: ResearchProject = {
+      ...base,
+      id: `${base.id}-${preset.id}`,
+      title: preset.title,
+      summary: `${preset.dimension}｜${preset.objective}`,
+      stage: 'report',
+      initialPrompt: seedPrompt,
+      intentClarify: {
+        ...base.intentClarify,
+        questions,
+        answers,
+        summary: `${preset.dimension}方向：${preset.objective}`,
+        completed: true,
+      },
+      fullTimeSource: {
+        mode: 'custom',
+        knowledgeScopes: {
+          insightReport: true,
+          vehicleKnowledge: true,
+          industryKnowledge: true,
+        },
+        onlineSearch: true,
+        completed: true,
+      },
+      fullDomainSource: {
+        mode: 'custom',
+        source: 'firstPlusThirdParty',
+        timeRange: 'year',
+        completed: true,
+      },
+      topicExplore: {
+        summary: `${preset.scenario}\n目标客户：${preset.audience}`,
+        suggestions: buildTopicSuggestions(base),
+        messages: [],
+        confirmedTopic: preset.title,
+      },
+      materialUploadStage: {
+        files: [],
+        skipped: true,
+      },
+      archived: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const plan = buildResearchPlan(topicProject);
+    const personaBuilt = buildPersonaCandidates(topicProject, { '研究维度': preset.dimension }, ['first', 'deep_interview']);
+    const selectedPersonaIds = personaBuilt.personas.slice(0, 8).map((persona) => persona.id);
+    const withPersona: ResearchProject = {
+      ...topicProject,
+      planStage: { plan, confirmed: true },
+      personaStage: {
+        ...topicProject.personaStage,
+        personas: personaBuilt.personas,
+        selectedPersonaIds,
+        matchedFromCdp: personaBuilt.matchedFromCdp,
+        supplementedFromSocial: personaBuilt.supplementedFromSocial,
+        confirmed: true,
+      },
+    };
+    const outline = buildInterviewOutline(withPersona);
+    const transcripts = Object.fromEntries(
+      withPersona.personaStage.personas
+        .slice(0, 6)
+        .map((persona) => [persona.id, buildInterviewTranscript(persona, preset.title, outline)] as const),
+    );
+    const completedProject: ResearchProject = {
+      ...withPersona,
+      interviewOutlineStage: { outline, confirmed: true },
+      interviewExecutionStage: {
+        transcripts,
+        selectedPersonaId: selectedPersonaIds[0] ?? null,
+      },
+      prePersonaMessages: [
+        { id: `preset-u-${now}`, role: 'user', text: seedPrompt, createdAt: now },
+        {
+          id: `preset-a-${now + 1}`,
+          role: 'assistant',
+          variant: 'thinking',
+          text: `已加载沃尔沃${preset.dimension}完整案例。\n- 场景：${preset.scenario}\n- 目标客户：${preset.audience}\n- 已自动构建：调研计划、人设筛选、访谈大纲、访谈执行与研究报告`,
+          createdAt: now + 1,
+        },
+      ],
+    };
+    completedProject.reportStage = {
+      report: buildFinalReport(completedProject),
+      generatedAt: now + 2,
+    };
+
+    persistProjects((currentProjects) => [completedProject, ...currentProjects]);
+    setActiveProjectId(completedProject.id);
+    setHomeView('insight');
+    setNewPrompt('');
+  };
+
   const exitProject = () => {
     setActiveProjectId(null);
     setTopicChatInput('');
@@ -1306,7 +1481,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                 <button
                   type="button"
                   onClick={() => setHomeView('history')}
-                  className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-4 py-2 text-sm text-gray-200 hover:bg-white/5"
+                  className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-bold text-black hover:bg-primary/90"
                 >
                   <History size={16} />
                   历史项目
@@ -1332,31 +1507,31 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                     </button>
                   </div>
                 </div>
-                <div className="w-full">
-                  <p className="mb-3 text-sm font-bold text-white">或从这些场景快速开始</p>
-                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                    {[
-                      {
-                        title: '“功效护肤退潮”后的新信任凭证',
-                        summary: '聚焦成分信任、品牌背书与真实体验证据，梳理用户从“种草”到“复购”的关键决策节点。',
-                      },
-                      {
-                        title: 'AI时代“手写笔记”为什么反而更火？',
-                        summary: '关注效率工具普及后，用户对记忆感、掌控感与情绪价值的回归，以及对应的产品机会。',
-                      },
-                      {
-                        title: '城市夜跑社群怎么变成“弱关系引擎”',
-                        summary: '研究社群活动如何从运动场景延展到身份表达、轻社交连接与长期参与机制。',
-                      },
-                    ].map((preset) => (
+                <div className="w-full space-y-3">
+                  <div>
+                    <h2 className="text-base font-bold text-white">从这些场景快速开始</h2>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    {VOLVO_PRESET_CASES.map((preset) => (
                       <button
-                        key={preset.title}
+                        key={preset.id}
                         type="button"
-                        onClick={() => setNewPrompt(preset.title)}
+                        onClick={() => createPresetProject(preset)}
                         className="rounded-2xl border border-white/10 bg-surface p-5 text-left transition-colors hover:bg-surface-hover"
                       >
-                        <h3 className="truncate text-lg font-bold text-white">{preset.title}</h3>
-                        <p className="mt-2 line-clamp-2 text-sm text-gray-300">{preset.summary}</p>
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-semibold text-primary">{preset.dimension}</p>
+                          <h3 className="mt-1 line-clamp-2 text-base font-bold text-white">{preset.title}</h3>
+                        </div>
+                        <p className="mt-2 line-clamp-2 text-xs text-gray-400">{preset.objective}</p>
+                        <p className="mt-1 line-clamp-1 text-[11px] text-gray-500">目标客户：{preset.audience}</p>
+                        <div className="mt-3 flex flex-wrap gap-1.5">
+                          {preset.deliverables.slice(0, 3).map((item) => (
+                            <span key={`${preset.id}-${item}`} className="rounded-full bg-white/5 px-2 py-1 text-[10px] text-gray-300">
+                              {item}
+                            </span>
+                          ))}
+                        </div>
                       </button>
                     ))}
                   </div>
@@ -1515,7 +1690,6 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
       ? ['完全不选']
       : [
           project.fullTimeSource.knowledgeScopes.insightReport ? '洞察报告库' : '',
-          project.fullTimeSource.knowledgeScopes.vehicleKnowledge ? '整车知识库' : '',
           project.fullTimeSource.knowledgeScopes.industryKnowledge ? '行业知识库' : '',
         ].filter(Boolean);
   }
@@ -1679,8 +1853,8 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
               >
                 <div className="flex items-start justify-between gap-2">
                   <h4 className="text-sm font-bold text-white">{persona.cardTitle}</h4>
-                  <span className="shrink-0 rounded-full px-2 py-0.5 text-[10px] bg-surface-hover text-gray-300">
-                    {persona.sourcePool === 'cdp' ? 'CDP' : persona.sourcePool === 'cdp_voc' ? 'CDP+VOC' : 'VOC'}
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-bold ${provenanceBadgeClass[persona.provenance]}`}>
+                    {provenanceLabel[persona.provenance]}
                   </span>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
@@ -1739,6 +1913,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
 
   function renderMaterialComposerBar() {
     if (!activeProject) return null;
+    const hasUploadedFiles = activeProject.materialUploadStage.files.length > 0;
     return (
       <div className="rounded-xl border border-primary/30 bg-surface/90 p-3">
         <p className="text-sm font-semibold text-white">上传线下访谈资料（PDF）</p>
@@ -1762,18 +1937,106 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
             }
             className="rounded-lg border border-white/20 px-3 py-1.5 text-xs text-gray-200 hover:bg-white/5"
           >
-            跳过并生成报告
-          </button>
-          <button
-            type="button"
-            onClick={() => updateProject(activeProject.id, (project) => ({ ...project, stage: 'report' }))}
-            className="rounded-lg border border-primary/40 px-3 py-1.5 text-xs text-primary hover:bg-primary/10"
-          >
-            继续生成最终报告
+            {hasUploadedFiles ? '生成最终报告' : '跳过并生成报告'}
           </button>
         </div>
       </div>
     );
+  }
+
+  function renderInStreamStageCta() {
+    if (!activeProject || isReviewMode) return null;
+    const cardClass = 'w-full max-w-lg rounded-2xl border border-primary/45 bg-primary/10 px-4 py-3 shadow-[0_0_0_1px_rgba(27,255,27,0.12)]';
+    const buttonClass = 'w-full rounded-lg bg-primary py-2.5 text-sm font-bold text-black hover:bg-primary/90';
+
+    if (activeProject.stage === 'plan') {
+      return (
+        <AssistantAvatarRow>
+          <div className={cardClass}>
+            <button
+              type="button"
+              onClick={() =>
+                updateProject(activeProject.id, (project) => ({
+                  ...project,
+                  stage: 'persona',
+                  planStage: { ...project.planStage, confirmed: true },
+                }))
+              }
+              className={buttonClass}
+            >
+              确认研究计划并进入人群筛选
+            </button>
+          </div>
+        </AssistantAvatarRow>
+      );
+    }
+
+    if (activeProject.stage === 'persona') {
+      return (
+        <AssistantAvatarRow>
+          <div className={cardClass}>
+            <button
+              type="button"
+              onClick={() =>
+                updateProject(activeProject.id, (project) => ({
+                  ...project,
+                  stage: 'interviewOutline',
+                  personaStage: { ...project.personaStage, confirmed: true },
+                }))
+              }
+              className={buttonClass}
+            >
+              确认这 {activeProject.personaStage.personas.length} 个人设并生成访谈大纲
+            </button>
+          </div>
+        </AssistantAvatarRow>
+      );
+    }
+
+    if (activeProject.stage === 'interviewOutline') {
+      return (
+        <AssistantAvatarRow>
+          <div className={cardClass}>
+            <button
+              type="button"
+              onClick={() =>
+                updateProject(activeProject.id, (project) => ({
+                  ...project,
+                  stage: 'interviewExecution',
+                  interviewOutlineStage: { outline: outlineDraft, confirmed: true },
+                }))
+              }
+              className={buttonClass}
+            >
+              确认访谈大纲并进入访谈执行
+            </button>
+          </div>
+        </AssistantAvatarRow>
+      );
+    }
+
+    if (activeProject.stage === 'interviewExecution') {
+      return (
+        <AssistantAvatarRow>
+          <div className={cardClass}>
+            <button
+              type="button"
+              onClick={() =>
+                updateProject(activeProject.id, (project) => ({
+                  ...project,
+                  stage: 'materialUpload',
+                }))
+              }
+              className={buttonClass}
+            >
+              继续补充资料并生成报告
+            </button>
+          </div>
+        </AssistantAvatarRow>
+      );
+    }
+
+    return null;
   }
 
   function renderTopicComposerBar() {
@@ -2022,7 +2285,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                 <div className="space-y-2">
                   <p className="text-xs text-gray-400">知识库范围（可多选；选「完全不选」则跳过）</p>
                   <div className="grid grid-cols-2 gap-2">
-                    {['洞察报告库', '整车知识库', '行业知识库', '完全不选'].map((option) => {
+                    {['洞察报告库', '行业知识库', '完全不选'].map((option) => {
                       const isSelected = sel.includes(option);
                       return (
                         <button
@@ -2059,7 +2322,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                                       mode: 'custom',
                                       knowledgeScopes: {
                                         insightReport: next.includes('洞察报告库'),
-                                        vehicleKnowledge: next.includes('整车知识库'),
+                                        vehicleKnowledge: false,
                                         industryKnowledge: next.includes('行业知识库'),
                                       },
                                     },
@@ -2482,6 +2745,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                   {renderPrePersonaStreamMessage(message, idx)}
                 </div>
               ))}
+              {renderInStreamStageCta()}
             </div>
             <div className="shrink-0 border-t border-white/10 p-4">{renderTopicComposerBar()}</div>
           </div>
@@ -2490,22 +2754,6 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
             {rightPanelSection === 'plan' ? (
               <div className="flex h-full min-h-0 flex-col">
               <div className="chat-scroll-area min-h-0 flex-1 overflow-y-auto">{renderPlanRightColumn(activeProject)}</div>
-              <div className="mt-4 flex shrink-0 justify-end gap-3">
-                <button
-                  type="button"
-                  disabled={isReviewMode}
-                  onClick={() =>
-                    updateProject(activeProject.id, (project) => ({
-                      ...project,
-                      stage: 'persona',
-                      planStage: { ...project.planStage, confirmed: true },
-                    }))
-                  }
-                  className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  确认研究计划并进入人群筛选
-                </button>
-              </div>
               </div>
             ) : (
               renderCrossStagePanel()
@@ -2527,21 +2775,18 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                       </div>
                     ))}
                     <div className={`rounded-2xl border border-white/10 bg-surface/40 p-3 ${isReviewMode ? 'pointer-events-none opacity-60' : ''}`}>
-                      <PersonaCdpTagFilterPanel selectedTagValues={personaFilterValues} onChange={setPersonaFilterValues} />
-                      {Object.keys(personaFilterValues).length > 0 && (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {Object.entries(personaFilterValues).map(([key, value]) => (
-                            <span key={key} className="rounded border border-primary/20 bg-primary/10 px-2 py-1 text-xs text-primary">
-                              {cdpFieldLabelMap.get(key) ?? key}：{value}
-                            </span>
-                          ))}
-                        </div>
-                      )}
+                      <PersonaCdpTagFilterPanel
+                        selectedTagValues={personaFilterValues}
+                        setSelectedTagValues={setPersonaFilterValues}
+                        selectedProvenance={selectedPersonaProvenance}
+                        setSelectedProvenance={setSelectedPersonaProvenance}
+                        hitCount={activeProject.personaStage.personas.length}
+                      />
                       <button
                         type="button"
                         disabled={isReviewMode}
                         onClick={() => {
-                          const built = buildPersonaCandidates(activeProject, personaFilterValues);
+                          const built = buildPersonaCandidates(activeProject, personaFilterValues, selectedPersonaProvenance);
                           updateProject(activeProject.id, (project) => ({
                             ...project,
                             personaStage: {
@@ -2560,6 +2805,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                         应用并生成新人设
                       </button>
                     </div>
+                    {renderInStreamStageCta()}
                   </>
                 );
               })()}
@@ -2572,10 +2818,9 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
               <p className="mb-3 text-sm text-gray-400">
                 {(() => {
                   const list = activeProject.personaStage.personas;
-                  const cdpN = list.filter((x) => x.sourcePool === 'cdp').length;
-                  const vocN = list.filter((x) => x.sourcePool === 'voc').length;
-                  const mixN = list.filter((x) => x.sourcePool === 'cdp_voc').length;
-                  return `共 ${list.length} 个候选人设 · CDP ${cdpN} 位 · VOC ${vocN} 位 · CDP+VOC ${mixN} 位`;
+                  const firstN = list.filter((x) => x.provenance === 'first').length;
+                  const deepInterviewN = list.filter((x) => x.provenance === 'deep_interview').length;
+                  return `共 ${list.length} 个候选人设 · 一方 ${firstN} 位 · 深度访谈 ${deepInterviewN} 位`;
                 })()}
               </p>
               {selectedPersona ? (
@@ -2597,93 +2842,68 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
               ) : (
                 <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
                   {activeProject.personaStage.personas.map((persona) => (
-                    <div
+                    <button
                       key={persona.id}
-                      role="button"
-                      tabIndex={0}
+                      type="button"
                       onClick={() =>
                         updateProject(activeProject.id, (project) => ({
                           ...project,
                           personaStage: { ...project.personaStage, detailPersonaId: persona.id },
                         }))
                       }
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          updateProject(activeProject.id, (project) => ({
-                            ...project,
-                            personaStage: { ...project.personaStage, detailPersonaId: persona.id },
-                          }));
-                        }
-                      }}
-                      className="rounded-xl border border-white/10 bg-surface p-3 text-left hover:bg-white/5"
+                      className="bg-surface p-6 rounded-xl relative group text-left hover:bg-surface-hover transition-colors"
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <h4 className="text-sm font-bold text-white">{persona.cardTitle}</h4>
-                        <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            disabled={isReviewMode}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setSavedPersonaIds((prev) => {
-                                const next = new Set(prev);
-                                if (next.has(persona.id)) next.delete(persona.id);
-                                else next.add(persona.id);
-                                return next;
-                              });
-                            }}
-                            className="rounded border border-white/20 p-1 text-gray-300 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-                            title={savedPersonaIds.has(persona.id) ? '已加入人设库' : '加入人设库'}
-                          >
-                            <BookmarkPlus size={12} className={savedPersonaIds.has(persona.id) ? 'text-primary' : ''} />
-                          </button>
-                          <span
-                            className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] ${
-                              persona.sourcePool === 'cdp'
-                                ? 'bg-primary/15 text-primary'
-                                : persona.sourcePool === 'cdp_voc'
-                                  ? 'bg-indigo-500/20 text-indigo-300'
-                                  : 'bg-blue-500/15 text-blue-300'
-                            }`}
-                          >
-                            {persona.sourcePool === 'cdp' ? 'CDP' : persona.sourcePool === 'cdp_voc' ? 'CDP+VOC' : 'VOC'}
-                          </span>
-                        </div>
+                      <div className="absolute top-4 right-4 flex items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={isReviewMode}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setSavedPersonaIds((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(persona.id)) next.delete(persona.id);
+                              else next.add(persona.id);
+                              return next;
+                            });
+                          }}
+                          className="rounded border border-white/20 p-1 text-gray-300 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                          title={savedPersonaIds.has(persona.id) ? '已加入人设库' : '加入人设库'}
+                        >
+                          <BookmarkPlus size={12} className={savedPersonaIds.has(persona.id) ? 'text-primary' : ''} />
+                        </button>
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[11px] font-bold ${provenanceBadgeClass[persona.provenance]}`}>
+                          {provenanceLabel[persona.provenance]}
+                        </span>
                       </div>
-                      <div className="mt-2 flex flex-wrap gap-2">
+                      <h3 className="text-2xl font-bold text-white mb-3">{getPersonaAlias(persona)}</h3>
+                      <div className="mb-8 flex flex-wrap gap-2">
                         {persona.tags.slice(0, 2).map((tag, tagIdx) => (
-                          <span
-                            key={`${persona.id}-${tag}-${tagIdx}`}
-                            className={
-                              'rounded px-2 py-1 bg-surface-hover text-xs text-gray-300'
-                            }
-                          >
+                          <span key={`${persona.id}-${tag}-${tagIdx}`} className={PERSONA_CARD_TAG_CLASS}>
                             {tag}
                           </span>
                         ))}
                       </div>
-                      {savedPersonaIds.has(persona.id) && <p className="mt-2 text-[11px] text-primary">已加入人设库</p>}
-                    </div>
+                      <div>
+                        <div className="mb-1 flex justify-between text-xs text-gray-400">
+                          <span>七维合计</span>
+                          <span className="text-lg font-bold text-white">
+                            {getRadarTotal(persona.radar)} <span className="text-xs font-normal text-gray-500">/ {radarChartLabels.length * RADAR_TIER_MAX}</span>
+                          </span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-surface-hover">
+                          <div
+                            className="h-full bg-primary"
+                            style={{ width: `${(getRadarTotal(persona.radar) / (radarChartLabels.length * RADAR_TIER_MAX)) * 100}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div className="mt-3 min-h-[16px]">
+                        {savedPersonaIds.has(persona.id) && <p className="text-[11px] text-primary">已加入人设库</p>}
+                      </div>
+                    </button>
                   ))}
                 </div>
               )}
-              <div className="mt-6 flex justify-end">
-                <button
-                  type="button"
-                  disabled={isReviewMode}
-                  onClick={() =>
-                    updateProject(activeProject.id, (project) => ({
-                      ...project,
-                      stage: 'interviewOutline',
-                      personaStage: { ...project.personaStage, confirmed: true },
-                    }))
-                  }
-                  className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  确认这 {activeProject.personaStage.personas.length} 个人设并生成访谈大纲
-                </button>
-              </div>
             </div>
             ) : (
               renderCrossStagePanel()
@@ -2699,6 +2919,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                   {renderPrePersonaStreamMessage(message, idx)}
                 </div>
               ))}
+              {renderInStreamStageCta()}
             </div>
             <div className="shrink-0 border-t border-white/10 p-4">{renderTopicComposerBar()}</div>
           </div>
@@ -2740,22 +2961,6 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                 />
               </div>
             </div>
-            <div className="mt-4 flex shrink-0 justify-end gap-3">
-                <button
-                type="button"
-                onClick={() =>
-                  updateProject(activeProject.id, (project) => ({
-                    ...project,
-                    stage: 'interviewExecution',
-                    interviewOutlineStage: { outline: outlineDraft, confirmed: true },
-                  }))
-                }
-                disabled={isReviewMode}
-                className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                确认访谈大纲并进入访谈执行
-              </button>
-            </div>
             </>
             )}
           </div>
@@ -2769,6 +2974,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                   {renderPrePersonaStreamMessage(message, idx)}
                 </div>
               ))}
+              {renderInStreamStageCta()}
             </div>
             <div className="shrink-0 border-t border-white/10 bg-background p-4">
               {renderTopicComposerBar()}
@@ -2860,21 +3066,6 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                       })}
                     </div>
                   </div>
-                  <div className="mt-4 flex shrink-0 justify-end">
-                    <button
-                      type="button"
-                      disabled={isReviewMode}
-                      onClick={() =>
-                        updateProject(activeProject.id, (project) => ({
-                          ...project,
-                          stage: 'materialUpload',
-                        }))
-                      }
-                      className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      继续补充资料并生成报告
-                    </button>
-                  </div>
                 </>
               );
             })()
@@ -2913,6 +3104,17 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
               renderCrossStagePanel()
             ) : (
               <>
+                {activeProject.stage === 'report' && activeProject.reportStage.report.trim() && (
+                  <div className="mb-3 flex shrink-0 justify-end">
+                    <button
+                      type="button"
+                      onClick={() => openReportPreview(activeProject)}
+                      className="rounded-lg border border-primary/40 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10"
+                    >
+                      查看报告
+                    </button>
+                  </div>
+                )}
                 <div className="chat-scroll-area min-h-0 flex-1 overflow-y-auto rounded-2xl border border-white/10 bg-white p-8 text-black shadow-2xl">
                   <div className="flex items-center justify-between border-b border-zinc-200 pb-4">
                     <div className="flex items-center gap-2 text-sm text-zinc-600">
@@ -2950,17 +3152,6 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
                     </>
                   )}
                 </div>
-                {activeProject.stage === 'report' && activeProject.reportStage.report.trim() && (
-                  <div className="mt-3 flex shrink-0 justify-end">
-                    <button
-                      type="button"
-                      onClick={() => openReportPreview(activeProject)}
-                      className="rounded-lg border border-primary/40 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10"
-                    >
-                      查看报告
-                    </button>
-                  </div>
-                )}
               </>
             )}
           </div>

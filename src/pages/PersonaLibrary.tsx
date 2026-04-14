@@ -1,17 +1,10 @@
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type Dispatch,
-  type SetStateAction,
-} from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, ArrowLeft, FileUp, Bot, Send } from 'lucide-react';
-import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer } from 'recharts';
 import Modal from '../components/Modal';
+import { PersonaRadarChart } from '../components/PersonaRadarChart';
+import { PersonaTagCategoryRow } from '../components/PersonaTagCategoryRow';
+import { filterSchema, type TagField } from '../data/personaFilterSchema';
+import { RADAR_TIER_MAX, radarChartLabels, radarValuesToTiers, sumRadarTiers } from '../utils/personaDisplay';
 import * as pdfjsLib from 'pdfjs-dist';
 
 // 配置 PDF.js worker
@@ -19,145 +12,6 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
   import.meta.url
 ).toString();
-
-type TagField = { key: string; label: string; options: string[] };
-type FilterGroup = { category: string; fields: TagField[] };
-
-function PersonaTagCategoryRow({
-  group,
-  isPoolOpen,
-  selectedTagValues,
-  setSelectedTagValues,
-  onPoolEnter,
-  onPoolLeave,
-}: {
-  group: FilterGroup;
-  isPoolOpen: boolean;
-  selectedTagValues: Record<string, string>;
-  setSelectedTagValues: Dispatch<SetStateAction<Record<string, string>>>;
-  onPoolEnter: (category: string) => void;
-  onPoolLeave: () => void;
-}) {
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-  const [openUp, setOpenUp] = useState(false);
-
-  const measurePanelLayout = useCallback(() => {
-    const wrap = wrapRef.current;
-    if (!wrap) return;
-
-    const wrapRect = wrap.getBoundingClientRect();
-
-    if (!isPoolOpen || !panelRef.current) return;
-    const ph = panelRef.current.getBoundingClientRect().height;
-    const margin = 8;
-    const spaceBelow = window.innerHeight - wrapRect.bottom - margin;
-    const spaceAbove = wrapRect.top - margin;
-    const fitsBelow = spaceBelow >= Math.min(ph, 320);
-    setOpenUp(!fitsBelow && spaceAbove > spaceBelow);
-  }, [isPoolOpen]);
-
-  useLayoutEffect(() => {
-    measurePanelLayout();
-  }, [measurePanelLayout, isPoolOpen, group.category, selectedTagValues]);
-
-  useLayoutEffect(() => {
-    if (!isPoolOpen) return;
-    const onScrollOrResize = () => measurePanelLayout();
-    window.addEventListener('scroll', onScrollOrResize, true);
-    window.addEventListener('resize', onScrollOrResize);
-    return () => {
-      window.removeEventListener('scroll', onScrollOrResize, true);
-      window.removeEventListener('resize', onScrollOrResize);
-    };
-  }, [isPoolOpen, measurePanelLayout]);
-
-  const isFieldFiltered = (fieldKey: string) => {
-    const v = selectedTagValues[fieldKey];
-    return typeof v === 'string' && v.length > 0 && v !== '全部';
-  };
-
-  return (
-    <div ref={wrapRef} className="relative">
-      <div className="grid grid-cols-12 gap-2 items-center py-1">
-        <div className="col-span-2">
-          <p className="text-[12px] font-bold text-white leading-5">{group.category}</p>
-        </div>
-
-        <div
-          className="col-span-10 flex items-center gap-[3px] text-[11px] text-gray-300 leading-5 truncate cursor-default"
-          onMouseEnter={() => onPoolEnter(group.category)}
-          onMouseLeave={onPoolLeave}
-          title={group.fields.map((f) => f.label).join('/')}
-        >
-          {group.fields.map((f, idx) => {
-            const filtered = isFieldFiltered(f.key);
-            return (
-              <span key={f.key} className="inline-flex items-center shrink-0">
-                <span className={filtered ? 'font-semibold text-primary' : undefined}>{f.label}</span>
-                {idx < group.fields.length - 1 && <span className="mx-[3px] shrink-0 text-gray-500">/</span>}
-              </span>
-            );
-          })}
-        </div>
-      </div>
-
-      {isPoolOpen && (
-        <div
-          ref={panelRef}
-          className={`absolute left-1/2 z-30 w-max min-w-0 max-w-full -translate-x-1/2 bg-surface border border-white/10 rounded-lg py-3 px-[calc(0.75rem+1ch)] shadow-2xl max-h-[min(18rem,55vh)] overflow-y-auto ${
-            openUp ? 'bottom-full mb-1' : 'top-full mt-1'
-          }`}
-          onMouseEnter={() => onPoolEnter(group.category)}
-          onMouseLeave={onPoolLeave}
-        >
-          <p className="text-xs font-bold text-white mb-2 whitespace-nowrap">{group.category} 标签池</p>
-          <div className="grid w-full min-w-0 grid-cols-[auto_1fr] gap-x-[3ch] gap-y-2 items-start">
-            {group.fields.map((field) => {
-              const currentValue = selectedTagValues[field.key] ?? '全部';
-              const filtered = isFieldFiltered(field.key);
-              return (
-                <Fragment key={field.key}>
-                  <div
-                    className={`self-start pt-0.5 text-[11px] ${filtered ? 'font-semibold text-primary' : 'text-gray-400'}`}
-                  >
-                    {field.label}
-                  </div>
-                  <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-1">
-                    {['全部', ...field.options].map((opt) => {
-                      const selected = currentValue === opt;
-                      return (
-                        <button
-                          key={`${field.key}-${opt}`}
-                          type="button"
-                          onClick={() => {
-                            setSelectedTagValues((prev) => {
-                              if (opt === '全部') {
-                                const next = { ...prev };
-                                delete next[field.key];
-                                return next;
-                              }
-                              return { ...prev, [field.key]: opt };
-                            });
-                          }}
-                          className={`text-[11px] transition-colors ${
-                            selected ? 'text-primary' : 'text-gray-300 hover:text-white'
-                          }`}
-                        >
-                          {opt}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </Fragment>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 export default function PersonaLibrary() {
   // 筛选状态
@@ -176,60 +30,6 @@ export default function PersonaLibrary() {
   const personaCardTagClass = 'px-2 py-1 bg-surface-hover text-gray-300 text-xs rounded';
   const uploadRef = useRef<HTMLInputElement>(null);
   const tagPoolCloseTimerRef = useRef<number | null>(null);
-
-  const filterSchema: FilterGroup[] = [
-    { category: '身份信息', fields: [
-      { key: 'gender', label: '性别', options: ['男', '女'] },
-      { key: 'age', label: '年龄', options: ['18–25', '26–35', '36–45', '46–60'] },
-      { key: 'maritalStatus', label: '婚姻状况', options: ['未婚', '已婚', '离异'] },
-      { key: 'province', label: '省份', options: ['北京', '上海', '广东', '浙江', '四川'] },
-      { key: 'familySize', label: '家庭人数', options: ['1', '2', '3', '4', '5+'] },
-      { key: 'familyStructure', label: '家庭结构', options: ['未婚', '已婚无孩', '已婚1孩', '已婚多孩'] },
-    ]},
-    { category: '用户属性', fields: [
-      { key: 'education', label: '学历', options: ['本科及以上', '本科以下'] },
-      { key: 'industry', label: '行业', options: ['白领（互联网/金融）', '体制内', '自由职业', '制造业', '其他'] },
-      { key: 'occupation', label: '职业', options: ['企业职员', '管理层', '自由职业', '公务员', '学生'] },
-      { key: 'annualIncome', label: '年收入', options: ['10万以下', '10–30万', '30–50万', '50万以上'] },
-      { key: 'familyMonthlyIncome', label: '家庭月收入', options: ['1万以下', '1–3万', '3–5万', '5–10万', '10万以上'] },
-      { key: 'customerType', label: '客户类型', options: ['个人', '企业'] },
-    ]},
-    { category: '生命周期', fields: [
-      { key: 'salesType', label: '售卖类型', options: ['新车', '二手车'] },
-      { key: 'purchaseType', label: '购买类型', options: ['首购', '增购', '置换'] },
-      { key: 'latestOrderStatus', label: '最近订单状态', options: ['未下单', '已下单', '已交车', '已取消'] },
-    ]},
-    { category: '车辆资产', fields: [
-      { key: 'isVolvoOwner', label: '是否Volvo车主', options: ['是', '否'] },
-      { key: 'model', label: '车型', options: ['XC40', 'XC60', 'XC90', 'S60', 'S90'] },
-      { key: 'powerType', label: '动力类别', options: ['燃油', '混动', '纯电'] },
-      { key: 'vehicleAge', label: '购车车龄', options: ['<3年', '3–5年', '5–8年', '8年以上'] },
-      { key: 'salesMode', label: '销售模式', options: ['直售', '经销商'] },
-    ]},
-    { category: '行为标签', fields: [
-      { key: 'multiStoreVisit', label: '是否多次到店', options: ['是', '否'] },
-      { key: 'latestTestDriveModel', label: '最近试驾车型', options: ['XC40', 'XC60', 'XC90', 'S60', 'S90'] },
-      { key: 'latestTestDriveTime', label: '最近试驾时间', options: ['最近7天', '最近30天', '30天以上'] },
-      { key: 'modelInterest', label: '车型兴趣强度', options: ['高（多次浏览/试驾）', '中', '低'] },
-      { key: 'latestInterestedModel', label: '最近感兴趣车型', options: ['XC40', 'XC60', 'XC90', 'S60', 'S90'] },
-    ]},
-    { category: '偏好标签', fields: [
-      { key: 'lifestyleTag', label: '生活方式标签', options: ['运动', '旅行', '家庭导向', '科技爱好', '美食'] },
-      { key: 'bodyTypePreference', label: '车型偏好', options: ['SUV', '轿车'] },
-      { key: 'purchaseFocus', label: '购车关注点', options: ['外观', '空间', '安全', '智能化', '性价比', '品牌'] },
-    ]},
-    { category: '购车决策', fields: [
-      { key: 'budget', label: '购车预算', options: ['20万以下', '20–30万', '30–40万', '40–50万', '50万以上'] },
-      { key: 'priceSensitivity', label: '价格敏感度', options: ['高', '中', '低'] },
-      { key: 'brandSensitivity', label: '品牌敏感度', options: ['高', '中', '低'] },
-      { key: 'performanceFocus', label: '性能关注度', options: ['高', '中', '低'] },
-      { key: 'purchaseUsage', label: '购车用途', options: ['通勤', '家庭', '商务', '长途'] },
-      { key: 'actualDriver', label: '实际驾驶人', options: ['自己', '家庭成员', '公司'] },
-      { key: 'competitorBrand', label: '竞争品牌', options: ['宝马', '奔驰', '奥迪', '新势力'] },
-      { key: 'competitorModel', label: '竞品车型', options: ['宝马X3', '奔驰GLC', '奥迪Q5'] },
-      { key: 'ownedBrand', label: '保有品牌', options: ['沃尔沃', '宝马', '奔驰', '奥迪', '无车'] },
-    ]},
-  ];
 
   type PersonaProvenance = 'first' | 'third' | 'deep_interview';
   type Persona = {
@@ -366,7 +166,7 @@ export default function PersonaLibrary() {
     { id: 'p-40', name: '古天乐', tags: ['社群活跃', '车友会'], score: 8.7, conf: 92, category: '品牌认知与情感连接', subCategory: '社群参与', cdpTags: ['车友会成员', '活动参与', '社群贡献'], voc: '我经常参加车友会活动，和其他车主交流用车心得。', radar: [82, 85, 88, 90, 85, 88, 95] },
   ] as Array<Omit<Persona, 'provenance'>>).map((p, idx) => ({
     ...p,
-    provenance: idx % 3 === 0 ? 'first' : idx % 3 === 1 ? 'third' : 'deep_interview',
+    provenance: idx % 2 === 0 ? 'first' : 'deep_interview',
   })));
 
   const allFields = filterSchema.flatMap((group) => group.fields);
@@ -375,6 +175,46 @@ export default function PersonaLibrary() {
   const pickByHash = (options: string[], seed: string) => options[hashString(seed) % options.length];
   const deriveTagValue = (p: Persona, field: TagField) => pickByHash(field.options, `${p.id}-${p.name}-${field.key}`);
   const selectedTagCount = Object.keys(selectedTagValues).length + selectedProvenance.length;
+  const getRadarTotal = (radar: number[]) => sumRadarTiers(radarValuesToTiers(radar));
+  const radarTotalMax = radarChartLabels.length * RADAR_TIER_MAX;
+  const personaTagKeywordMap: Partial<Record<string, string[]>> = {
+    purchaseFocus: ['安全', '空间', '智能', '外观', '性价比', '品牌', '舒适', '品质'],
+    purchaseUsage: ['通勤', '家庭', '商务', '长途', '周末', '亲子'],
+    priceSensitivity: ['预算', '价格', '优惠', '促销', '省'],
+    brandSensitivity: ['品牌', '忠诚', '信任', '沃尔沃'],
+    modelInterest: ['试驾', '浏览', '兴趣'],
+    latestTestDriveTime: ['试驾', '最近'],
+    bodyTypePreference: ['SUV', '轿车', '空间'],
+    lifestyleTag: ['运动', '旅行', '家庭', '科技', '美食', '户外'],
+    industry: ['互联网', '金融', '自由职业', '制造业', '体制内'],
+    annualIncome: ['高净值', '收入', '预算'],
+    age: ['年轻', '中年', '退休', '银发', 'Z世代'],
+    familyStructure: ['家庭', '孩子', '二胎', '三口', '五口'],
+    powerType: ['燃油', '混动', '纯电', '新能源'],
+  };
+
+  const getPersonaDisplayTags = (p: Persona) => {
+    const text = `${p.category} ${p.subCategory} ${p.tags.join(' ')} ${p.cdpTags.join(' ')} ${p.voc}`.toLowerCase();
+    const richness = getRadarTotal(p.radar) / radarTotalMax;
+    const targetCount = Math.max(3, Math.min(5, 3 + Math.round(richness * 2)));
+    const scored = allFields.map((field) => {
+      const keywords = personaTagKeywordMap[field.key] ?? [];
+      const keywordHits = keywords.reduce((acc, kw) => acc + (text.includes(kw.toLowerCase()) ? 1 : 0), 0);
+      const semanticHint =
+        (text.includes(field.label.toLowerCase()) ? 1 : 0) +
+        field.options.reduce((acc, opt) => acc + (text.includes(opt.toLowerCase()) ? 1 : 0), 0);
+      const hashBoost = (hashString(`${p.id}-${field.key}`) % 17) / 100;
+      return {
+        field,
+        value: deriveTagValue(p, field),
+        score: keywordHits * 3 + semanticHint * 1.5 + hashBoost,
+      };
+    });
+    return scored
+      .sort((a, b) => b.score - a.score)
+      .slice(0, targetCount)
+      .map((item) => `${item.field.label}：${item.value}`);
+  };
 
   const filteredPersonas = useMemo(() => {
     let result = allPersonas;
@@ -418,10 +258,6 @@ export default function PersonaLibrary() {
     () => allPersonas.find((p) => p.id === selectedPersonaId) ?? null,
     [allPersonas, selectedPersonaId],
   );
-  const radarLabels = ['人口与成长轨迹', '心理动因', '心理特征维度', '行为维度', '需求与痛点维度', '技术接受度维度', '社会关系维度'];
-  const radarData = selectedPersona
-    ? radarLabels.map((label, idx) => ({ subject: label, value: selectedPersona.radar[idx], fullMark: 100 }))
-    : [];
 
   const onPickPdfFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -533,6 +369,7 @@ export default function PersonaLibrary() {
 
   if (selectedPersona) {
     const vocKeywords = getVocKeywords(selectedPersona.voc, 8);
+    const personaDisplayTags = getPersonaDisplayTags(selectedPersona);
 
     if (isPersonaChatOpen) {
       const handleSendPersonaChat = () => {
@@ -544,7 +381,7 @@ export default function PersonaLibrary() {
           {
             id: `a-${Date.now() + 1}`,
             role: 'assistant',
-            text: `基于「${getPersonaAlias(selectedPersona)}」的人设信息，我建议从这几个角度回答你的问题：\n1) 画像特征：${selectedPersona.tags.join('、')}\n2) 关键标签：${selectedPersona.cdpTags.slice(0, 3).join('、')}\n3) 典型声音：${selectedPersona.voc}\n\n如果你愿意，我可以继续把这个问题拆成可执行策略。`,
+            text: `基于「${getPersonaAlias(selectedPersona)}」的人设信息，我建议从这几个角度回答你的问题：\n1) 画像特征：${selectedPersona.tags.join('、')}\n2) 关键标签：${personaDisplayTags.slice(0, 3).join('、')}\n3) 典型声音：${selectedPersona.voc}\n\n如果你愿意，我可以继续把这个问题拆成可执行策略。`,
           },
         ]);
         setPersonaChatInput('');
@@ -640,10 +477,10 @@ export default function PersonaLibrary() {
         <div className="grid grid-cols-12 gap-6">
           <div className="col-span-12 bg-surface rounded-xl p-6 space-y-6">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="text-sm font-bold text-white">CDP标签：</p>
+              <p className="text-sm font-bold text-white">人设标签：</p>
               <div className="flex flex-wrap gap-2">
-                {selectedPersona.cdpTags.length > 0 ? (
-                  selectedPersona.cdpTags.map((tag) => (
+                {personaDisplayTags.length > 0 ? (
+                  personaDisplayTags.map((tag) => (
                     <span key={tag} className="px-3 py-1 rounded border border-primary/40 bg-primary/15 text-xs text-primary">
                       {tag}
                     </span>
@@ -655,11 +492,8 @@ export default function PersonaLibrary() {
             </div>
 
             <div className="space-y-3 text-sm text-gray-200 leading-relaxed">
-              <p>
-                <span className="font-bold text-white">VOC 原始文本：</span>"{selectedPersona.voc}"
-              </p>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-bold text-white">VOC 关键词：</span>
+                <span className="text-sm font-bold text-white">人设关键词：</span>
                 {vocKeywords.length > 0 ? (
                   vocKeywords.map((kw) => (
                     <span key={kw} className="px-2.5 py-1 rounded border border-primary/40 bg-primary/15 text-xs text-primary">
@@ -693,16 +527,7 @@ export default function PersonaLibrary() {
 
             <div>
               <h4 className="text-lg font-bold text-white mb-3">七维评分雷达图</h4>
-              <div className="h-[420px] min-h-[320px] min-w-0">
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={320}>
-                  <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
-                    <PolarGrid stroke="#2d2935" />
-                    <PolarAngleAxis dataKey="subject" tick={{ fill: '#8a8a8a', fontSize: 12 }} />
-                    <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
-                    <Radar name="评分" dataKey="value" stroke="#1bff1b" fill="#1bff1b" fillOpacity={0.25} />
-                  </RadarChart>
-                </ResponsiveContainer>
-              </div>
+              <PersonaRadarChart radar={selectedPersona.radar} />
             </div>
           </div>
         </div>
@@ -771,7 +596,6 @@ export default function PersonaLibrary() {
             <div className="col-span-10 flex flex-wrap items-center gap-[3px] gap-y-1 text-[11px] text-gray-300 leading-5">
               {([
                 { id: 'first' as const, label: '一方' },
-                { id: 'third' as const, label: '三方' },
                 { id: 'deep_interview' as const, label: '深度访谈' },
               ]).map((opt, idx, arr) => {
                 const active = selectedProvenance.includes(opt.id);
@@ -821,7 +645,7 @@ export default function PersonaLibrary() {
             <button
               type="button"
               onClick={() => setIsCreateModalOpen(true)}
-              className="flex min-h-[240px] w-full flex-col items-center justify-center rounded-xl border-2 border-dashed border-white/10 text-gray-500 transition-colors hover:border-white/30 hover:text-white"
+              className="flex h-[174px] w-full flex-col items-center justify-center rounded-xl border-2 border-dashed border-white/10 text-gray-500 transition-colors hover:border-white/30 hover:text-white"
             >
               <Plus size={32} className="mb-2" />
               <span className="text-sm font-bold">创建新的人设</span>
@@ -832,15 +656,15 @@ export default function PersonaLibrary() {
               key={p.id}
               type="button"
               onClick={() => setSelectedPersonaId(p.id)}
-              className="bg-surface p-6 rounded-xl relative group text-left hover:bg-surface-hover transition-colors"
+              className="bg-surface p-6 rounded-xl relative group text-left hover:bg-surface-hover transition-colors h-[174px] flex flex-col"
             >
-              <div className="absolute top-4 right-4">
+              <div className="absolute top-6 right-6">
                 <span className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[11px] font-bold ${provenanceBadgeClass[p.provenance]}`}>
                   {provenanceLabel[p.provenance]}
                 </span>
               </div>
-              <h3 className="text-2xl font-bold text-white mb-3">{getPersonaAlias(p)}</h3>
-              <div className="mb-8 flex flex-wrap gap-2">
+              <h3 className="pr-16 text-2xl font-bold text-white mb-2">{getPersonaAlias(p)}</h3>
+              <div className="mb-6 flex flex-wrap gap-2">
                 {p.tags.slice(0, 2).map((tag, idx) => (
                   <span key={`${p.id}-tag-${idx}`} className={personaCardTagClass}>
                     {tag}
@@ -848,26 +672,18 @@ export default function PersonaLibrary() {
                 ))}
               </div>
 
-              <div className="space-y-4">
-                <div>
-                  <div className="mb-1 flex justify-between text-xs text-gray-400">
-                    <span>综合评分</span>
-                    <span className="text-lg font-bold text-white">
-                      {p.score} <span className="text-xs font-normal text-gray-500">/ 10</span>
-                    </span>
-                  </div>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-surface-hover">
-                    <div className="h-full bg-primary" style={{ width: `${p.score * 10}%` }}></div>
-                  </div>
+              <div className="mt-auto">
+                <div className="mb-1 flex justify-between text-xs text-gray-400">
+                  <span>七维合计</span>
+                  <span className="text-lg font-bold text-white">
+                    {getRadarTotal(p.radar)} <span className="text-xs font-normal text-gray-500">/ {radarTotalMax}</span>
+                  </span>
                 </div>
-                <div>
-                  <div className="mb-1 flex justify-between text-xs text-gray-400">
-                    <span>置信度</span>
-                    <span className="text-lg font-bold text-white">{p.conf}%</span>
-                  </div>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-surface-hover">
-                    <div className="h-full bg-primary" style={{ width: `${p.conf}%` }}></div>
-                  </div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-surface-hover">
+                  <div
+                    className="h-full bg-primary"
+                    style={{ width: `${(getRadarTotal(p.radar) / radarTotalMax) * 100}%` }}
+                  ></div>
                 </div>
               </div>
             </button>

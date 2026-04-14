@@ -310,7 +310,7 @@ export function createEmptyProject(initialPrompt = ''): ResearchProject {
       mode: 'custom',
       knowledgeScopes: {
         insightReport: true,
-        vehicleKnowledge: true,
+        vehicleKnowledge: false,
         industryKnowledge: false,
       },
       onlineSearch: true,
@@ -373,7 +373,7 @@ function migrateLegacyInsightRun(raw: LegacyInsightRun): ResearchProject {
       mode: raw.fullTimeEnabled === false ? 'skip' : 'custom',
       knowledgeScopes: {
         insightReport: raw.fullTimeFilters?.knowledgeScopes?.insightReport ?? true,
-        vehicleKnowledge: raw.fullTimeFilters?.knowledgeScopes?.vehicleKnowledge ?? true,
+        vehicleKnowledge: raw.fullTimeFilters?.knowledgeScopes?.vehicleKnowledge ?? false,
         industryKnowledge: raw.fullTimeFilters?.knowledgeScopes?.industryKnowledge ?? false,
       },
       onlineSearch: raw.fullTimeFilters?.isOnlineSearch ?? true,

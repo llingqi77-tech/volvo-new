@@ -64,6 +64,31 @@ export const radarChartLabels = [
   '社会关系维度',
 ];
 
+/** 单维雷达分上限（与画像分析 0–3 分档一致） */
+export const RADAR_TIER_MAX = 3;
+
+export const RADAR_DIMENSION_COUNT = 7;
+
+/**
+ * 将雷达原始值规范为 0–3 分整数。
+ * - 若各维最大值 ≤3，视为已是分档分；
+ * - 否则按 0–100 量纲线性映射到 0–3（与素材丰富度→半径的几何化一致）。
+ */
+export function radarValuesToTiers(radar: number[]): number[] {
+  const list = radar.slice(0, RADAR_DIMENSION_COUNT).map((x) => Number(x) || 0);
+  while (list.length < RADAR_DIMENSION_COUNT) list.push(0);
+  const max = Math.max(0, ...list);
+  if (max <= RADAR_TIER_MAX) {
+    return list.map((x) => Math.min(RADAR_TIER_MAX, Math.max(0, Math.round(x))));
+  }
+  return list.map((x) => Math.min(RADAR_TIER_MAX, Math.max(0, Math.round((x / 100) * RADAR_TIER_MAX))));
+}
+
+/** 七维 0–3 分之和，满分 21 */
+export function sumRadarTiers(tiers: number[]): number {
+  return tiers.reduce((a, b) => a + b, 0);
+}
+
 export function getVocKeywords(voc: string, limit = 6) {
   const text = (voc ?? '')
     .replace(/[""'']/g, '')

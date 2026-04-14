@@ -1,6 +1,8 @@
 export type TagField = { key: string; label: string; options: string[] };
 
-export const filterSchema: Array<{ category: string; fields: TagField[] }> = [
+export type FilterGroup = { category: string; fields: TagField[] };
+
+export const filterSchema: FilterGroup[] = [
   {
     category: '身份信息',
     fields: [

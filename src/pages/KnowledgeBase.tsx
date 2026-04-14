@@ -15,7 +15,7 @@ export default function KnowledgeBase({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedUploader, setSelectedUploader] = useState<string>('全部');
   const [selectedUploadFiles, setSelectedUploadFiles] = useState<File[]>([]);
-  const [uploadCategory, setUploadCategory] = useState<'洞察报告库' | '整车知识库' | '行业知识库'>('洞察报告库');
+  const [uploadCategory, setUploadCategory] = useState<'洞察报告库' | '行业知识库'>('洞察报告库');
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -76,12 +76,11 @@ export default function KnowledgeBase({
     setSelectedUploadFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  const categories = ['全库文档', '洞察报告库', '整车知识库', '行业知识库'];
+  const categories = ['全库文档', '洞察报告库', '行业知识库'];
 
   // 计算各类别的文档数量
   const categoryStats = {
     '洞察报告库': docs.filter(d => d.category === '洞察报告库').length,
-    '整车知识库': docs.filter(d => d.category === '整车知识库').length,
     '行业知识库': docs.filter(d => d.category === '行业知识库').length,
   };
 
@@ -159,10 +158,6 @@ export default function KnowledgeBase({
                 <span className="text-xs text-gray-400">洞察报告</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="w-2 h-2 bg-blue-400 rounded-full"></span>
-                <span className="text-xs text-gray-400">整车知识</span>
-              </div>
-              <div className="flex items-center gap-2">
                 <span className="w-2 h-2 bg-gray-600 rounded-full"></span>
                 <span className="text-xs text-gray-400">行业报告</span>
               </div>
@@ -177,15 +172,6 @@ export default function KnowledgeBase({
                   className="w-full bg-primary rounded-t-sm transition-all"
                   style={{ height: totalDocs > 0 ? `${Math.max((categoryStats['洞察报告库'] / totalDocs) * 100, 10)}%` : '10%' }}
                   title={`洞察报告：${categoryStats['洞察报告库']} 个文档`}
-                ></div>
-              </div>
-              {/* 整车知识 */}
-              <div className="w-full flex flex-col items-center justify-end h-full">
-                <span className="text-xs font-bold text-blue-400 mb-1">{categoryStats['整车知识库']}</span>
-                <div
-                  className="w-full bg-blue-400 rounded-t-sm transition-all"
-                  style={{ height: totalDocs > 0 ? `${Math.max((categoryStats['整车知识库'] / totalDocs) * 100, 10)}%` : '10%' }}
-                  title={`整车知识：${categoryStats['整车知识库']} 个文档`}
                 ></div>
               </div>
               {/* 行业知识 */}
@@ -252,7 +238,20 @@ export default function KnowledgeBase({
         </div>
         <div className="divide-y divide-white/5">
           {filteredDocs.length > 0 ? filteredDocs.map((doc, i) => (
-            <div key={doc.id} className="grid grid-cols-12 px-6 py-4 items-center hover:bg-white/5 transition-colors">
+            <div
+              key={doc.id}
+              role="button"
+              tabIndex={0}
+              aria-label={`打开文档：${doc.title}`}
+              onClick={() => setSelectedDocId(doc.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setSelectedDocId(doc.id);
+                }
+              }}
+              className="grid grid-cols-12 px-6 py-4 items-center hover:bg-white/5 transition-colors cursor-pointer"
+            >
               <div className="col-span-5 flex items-center gap-4">
                 <FileText className={doc.color} size={24} />
                 <div>
@@ -273,16 +272,24 @@ export default function KnowledgeBase({
               </div>
               <div className="col-span-1 flex items-center justify-end gap-2">
                 <button
-                  onClick={() => setSelectedDocId(doc.id)}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedDocId(doc.id);
+                  }}
                   className="px-2 py-1 text-xs rounded bg-surface-hover text-gray-300 hover:text-white transition-colors"
                   title="查看详情"
                 >
                   查看详情
                 </button>
                 <button
+                  type="button"
                   className="px-2 py-1 text-xs rounded bg-surface-hover text-gray-300 hover:text-red-400 transition-colors"
                   title="删除文档"
-                  onClick={() => handleDeleteDoc(doc.id, doc.title)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteDoc(doc.id, doc.title);
+                  }}
                 >
                   删除
                 </button>
@@ -388,11 +395,10 @@ export default function KnowledgeBase({
             <label className="block text-xs font-bold text-gray-400 mb-2">文档归属</label>
             <select
               value={uploadCategory}
-              onChange={(e) => setUploadCategory(e.target.value as '洞察报告库' | '整车知识库' | '行业知识库')}
+              onChange={(e) => setUploadCategory(e.target.value as '洞察报告库' | '行业知识库')}
               className="w-full bg-surface-hover border border-white/10 rounded-lg p-3 text-sm text-white outline-none focus:border-primary"
             >
               <option value="洞察报告库">洞察报告</option>
-              <option value="整车知识库">整车知识</option>
               <option value="行业知识库">行业报告</option>
             </select>
           </div>
@@ -506,9 +512,15 @@ function DocumentDetail({ doc, onBack, onDelete }: { doc: KnowledgeDoc; onBack: 
         </div>
       </div>
 
-      {/* 文档内容预览 */}
+      {/* 文档内容预览（演示用结构化摘要，非 PDF 原文） */}
       <div className="bg-white text-black rounded-xl p-12">
         <div className="max-w-4xl mx-auto">
+          <div
+            className="mb-6 rounded-lg border border-amber-400/80 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+            role="note"
+          >
+            <p className="leading-relaxed">此为原文提炼的总结，如需阅读原文请于右上角下载。</p>
+          </div>
           <div className="mb-8">
             <h2 className="text-2xl font-bold mb-4">{doc.title}</h2>
             <div className="h-1 bg-black w-20 mb-6"></div>
@@ -573,11 +585,6 @@ function DocumentDetail({ doc, onBack, onDelete }: { doc: KnowledgeDoc; onBack: 
               </p>
             </section>
 
-            <div className="mt-12 pt-6 border-t border-gray-300">
-              <p className="text-sm text-gray-500 text-center">
-                本文档由 {doc.uploader} 于 {doc.uploadDate} 上传 | {doc.category}
-              </p>
-            </div>
           </div>
         </div>
       </div>
