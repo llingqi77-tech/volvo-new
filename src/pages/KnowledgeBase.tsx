@@ -1,5 +1,5 @@
 import { Dispatch, SetStateAction, useRef, useState } from 'react';
-import { Upload, Search, FileText, TrendingUp, FolderOpen, FileUp, Folder, ArrowLeft, Download, Share2, Calendar, User as UserIcon } from 'lucide-react';
+import { Upload, Search, FileText, TrendingUp, FolderOpen, FileUp, Folder, ArrowLeft, Download, Calendar, User as UserIcon } from 'lucide-react';
 import Modal from '../components/Modal';
 import type { KnowledgeDoc } from '../App';
 
@@ -430,10 +430,6 @@ function DocumentDetail({ doc, onBack, onDelete }: { doc: KnowledgeDoc; onBack: 
     window.alert(`下载功能演示：${doc.title}`);
   };
 
-  const handleShare = () => {
-    window.alert(`分享功能演示：${doc.title}`);
-  };
-
   return (
     <div className="p-10 max-w-7xl mx-auto">
       {/* 顶部操作栏 */}
@@ -446,13 +442,6 @@ function DocumentDetail({ doc, onBack, onDelete }: { doc: KnowledgeDoc; onBack: 
           返回文档列表
         </button>
         <div className="flex gap-3">
-          <button
-            onClick={handleShare}
-            className="px-4 py-2 bg-surface hover:bg-surface-hover rounded flex items-center gap-2 text-sm text-gray-300 hover:text-white transition-colors"
-          >
-            <Share2 size={16} />
-            分享
-          </button>
           <button
             onClick={handleDownload}
             className="px-4 py-2 bg-surface hover:bg-surface-hover rounded flex items-center gap-2 text-sm text-gray-300 hover:text-white transition-colors"
