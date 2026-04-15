@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Archive, ArchiveRestore, ArrowLeft, Bot, BookmarkPlus, Check, Download, FileText, History, Plus, Search, Send, Share2 } from 'lucide-react';
 import { PersonaCdpTagFilterPanel } from '../components/PersonaCdpTagFilterPanel';
 import { PersonaDetailView } from '../components/PersonaDetailView';
+import { filterSchema, type TagField } from '../data/personaFilterSchema';
 import {
   RADAR_TIER_MAX,
   getPersonaAlias,
@@ -237,9 +238,15 @@ function hashStringToInt(s: string) {
   return s.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
 }
 
+const allTagFields = filterSchema.flatMap((group) => group.fields);
+const allTagFieldMap = new Map(allTagFields.map((field) => [field.key, field]));
+const pickByHash = (options: string[], seed: string) => options[hashStringToInt(seed) % options.length];
+const deriveTagValue = (persona: InterviewPersona, field: TagField) =>
+  pickByHash(field.options, `${persona.id}-${persona.name}-${field.key}`);
+
 function buildPersonaCandidates(
   project: ResearchProject,
-  tagOverrides: Record<string, string>,
+  tagOverrides: Record<string, string[]>,
   provenanceFilter: PersonaProvenance[] = [],
 ) {
   const topic = project.topicExplore.confirmedTopic || project.initialPrompt || project.title;
@@ -247,7 +254,7 @@ function buildPersonaCandidates(
   const cdpBase = project.fullTimeSource.mode === 'skip' && project.fullDomainSource.mode === 'skip' ? 8 : 12;
   const cdpCount = Math.min(cdpBase, total);
   const supplementCount = total - cdpCount;
-  const hintTags = Object.values(tagOverrides);
+  const hintTags = Object.values(tagOverrides).flat();
   let personas: InterviewPersona[] = Array.from({ length: total }, (_, idx) => {
     const social = idx >= cdpCount;
     const names = ['陈思远', '林沐然', '周祺', '许悠然', '张逸豪', '宋致远', '李嘉禾', '赵以宁', '王若晨', '郑知夏'];
@@ -281,6 +288,16 @@ function buildPersonaCandidates(
   });
   if (provenanceFilter.length > 0) {
     personas = personas.filter((persona) => provenanceFilter.includes(persona.provenance));
+  }
+  const selectedEntries = Object.entries(tagOverrides).filter(([, values]) => values.length > 0);
+  if (selectedEntries.length > 0) {
+    personas = personas.filter((persona) =>
+      selectedEntries.every(([key, values]) => {
+        const field = allTagFieldMap.get(key);
+        if (!field) return true;
+        return values.includes(deriveTagValue(persona, field));
+      }),
+    );
   }
   const matchedFromCdp = personas.filter((persona) => persona.sourcePool === 'cdp').length;
   const supplementedFromSocial = personas.length - matchedFromCdp;
@@ -642,7 +659,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
   const [historyPage, setHistoryPage] = useState(1);
   const [topicChatInput, setTopicChatInput] = useState('');
   const [outlineDraft, setOutlineDraft] = useState('');
-  const [personaFilterValues, setPersonaFilterValues] = useState<Record<string, string>>({});
+  const [personaFilterValues, setPersonaFilterValues] = useState<Record<string, string[]>>({});
   const [selectedPersonaProvenance, setSelectedPersonaProvenance] = useState<PersonaProvenance[]>([]);
   const [rightPanelSection, setRightPanelSection] = useState<RightPanelSection>('report');
   const [savedPersonaIds, setSavedPersonaIds] = useState<Set<string>>(new Set());
@@ -1123,7 +1140,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
     };
 
     const plan = buildResearchPlan(topicProject);
-    const personaBuilt = buildPersonaCandidates(topicProject, { '研究维度': preset.dimension }, ['first', 'deep_interview']);
+    const personaBuilt = buildPersonaCandidates(topicProject, { '研究维度': [preset.dimension] }, ['first', 'deep_interview']);
     const selectedPersonaIds = personaBuilt.personas.slice(0, 8).map((persona) => persona.id);
     const withPersona: ResearchProject = {
       ...topicProject,

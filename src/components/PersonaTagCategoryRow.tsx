@@ -19,8 +19,8 @@ export function PersonaTagCategoryRow({
 }: {
   group: FilterGroup;
   isPoolOpen: boolean;
-  selectedTagValues: Record<string, string>;
-  setSelectedTagValues: Dispatch<SetStateAction<Record<string, string>>>;
+  selectedTagValues: Record<string, string[]>;
+  setSelectedTagValues: Dispatch<SetStateAction<Record<string, string[]>>>;
   onPoolEnter: (category: string) => void;
   onPoolLeave: () => void;
 }) {
@@ -59,8 +59,8 @@ export function PersonaTagCategoryRow({
   }, [isPoolOpen, measurePanelLayout]);
 
   const isFieldFiltered = (fieldKey: string) => {
-    const v = selectedTagValues[fieldKey];
-    return typeof v === 'string' && v.length > 0 && v !== '全部';
+    const values = selectedTagValues[fieldKey];
+    return Array.isArray(values) && values.length > 0;
   };
 
   return (
@@ -100,7 +100,7 @@ export function PersonaTagCategoryRow({
           <p className="text-xs font-bold text-white mb-2 whitespace-nowrap">{group.category} 标签池</p>
           <div className="grid w-full min-w-0 grid-cols-[auto_1fr] gap-x-[3ch] gap-y-2 items-start">
             {group.fields.map((field) => {
-              const currentValue = selectedTagValues[field.key] ?? '全部';
+              const currentValues = selectedTagValues[field.key] ?? [];
               const filtered = isFieldFiltered(field.key);
               return (
                 <Fragment key={field.key}>
@@ -111,7 +111,7 @@ export function PersonaTagCategoryRow({
                   </div>
                   <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-1">
                     {['全部', ...field.options].map((opt) => {
-                      const selected = currentValue === opt;
+                      const selected = opt === '全部' ? currentValues.length === 0 : currentValues.includes(opt);
                       return (
                         <button
                           key={`${field.key}-${opt}`}
@@ -123,7 +123,16 @@ export function PersonaTagCategoryRow({
                                 delete next[field.key];
                                 return next;
                               }
-                              return { ...prev, [field.key]: opt };
+                              const prevValues = prev[field.key] ?? [];
+                              const nextValues = prevValues.includes(opt)
+                                ? prevValues.filter((value) => value !== opt)
+                                : [...prevValues, opt];
+                              if (nextValues.length === 0) {
+                                const next = { ...prev };
+                                delete next[field.key];
+                                return next;
+                              }
+                              return { ...prev, [field.key]: nextValues };
                             });
                           }}
                           className={`text-[11px] transition-colors ${

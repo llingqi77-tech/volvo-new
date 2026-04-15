@@ -7,7 +7,7 @@ export const filterSchema: FilterGroup[] = [
     category: '社会背景',
     fields: [
       { key: 'gender', label: '性别', options: ['男', '女'] },
-      { key: 'ageBandOneId', label: '年龄段_OneId', options: ['18-24岁', '25-35岁', '36-45岁', '46岁以上'] },
+      { key: 'ageBandOneId', label: '年龄', options: ['18-24岁', '25-35岁', '36-45岁', '46岁以上'] },
       { key: 'education', label: '学历', options: ['高中及以下', '大专', '本科', '硕士及以上'] },
       { key: 'industry', label: '行业', options: ['互联网', '制造业', '金融', '教育', '医疗'] },
       { key: 'enterpriseType', label: '企业性质', options: ['国企', '外企', '民企', '事业单位'] },

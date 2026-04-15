@@ -11,8 +11,8 @@ export function PersonaCdpTagFilterPanel({
   setSelectedProvenance,
   hitCount,
 }: {
-  selectedTagValues: Record<string, string>;
-  setSelectedTagValues: Dispatch<SetStateAction<Record<string, string>>>;
+  selectedTagValues: Record<string, string[]>;
+  setSelectedTagValues: Dispatch<SetStateAction<Record<string, string[]>>>;
   selectedProvenance: PersonaProvenance[];
   setSelectedProvenance: Dispatch<SetStateAction<PersonaProvenance[]>>;
   hitCount: number;
@@ -22,7 +22,9 @@ export function PersonaCdpTagFilterPanel({
 
   const allFields = filterSchema.flatMap((group) => group.fields);
   const allFieldMap = useMemo(() => new Map(allFields.map((f) => [f.key, f])), [allFields]);
-  const selectedTagCount = Object.keys(selectedTagValues).length + selectedProvenance.length;
+  const selectedTagCount =
+    Object.values(selectedTagValues).reduce((count, values) => count + values.length, 0) +
+    selectedProvenance.length;
 
   const scheduleCloseTagPool = () => {
     if (tagPoolCloseTimerRef.current) {
@@ -71,14 +73,14 @@ export function PersonaCdpTagFilterPanel({
               信源：{provenanceLabel[p]}
             </span>
           ))}
-          {Object.entries(selectedTagValues).map(([key, value]) => {
+          {Object.entries(selectedTagValues).flatMap(([key, values]) => {
             const field = allFieldMap.get(key);
-            if (!field || !value) return null;
-            return (
-              <span key={key} className="text-[12px] font-semibold text-primary">
+            if (!field || !Array.isArray(values) || values.length === 0) return [];
+            return values.map((value) => (
+              <span key={`${key}-${value}`} className="text-[12px] font-semibold text-primary">
                 {field.label}：{value}
               </span>
-            );
+            ));
           })}
           {selectedProvenance.length === 0 && Object.keys(selectedTagValues).length === 0 && (
             <span className="text-[11px] text-gray-500">暂无筛选条件</span>

@@ -15,7 +15,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 
 export default function PersonaLibrary() {
   // 筛选状态
-  const [selectedTagValues, setSelectedTagValues] = useState<Record<string, string>>({});
+  const [selectedTagValues, setSelectedTagValues] = useState<Record<string, string[]>>({});
   const [selectedProvenance, setSelectedProvenance] = useState<Array<'first' | 'third' | 'deep_interview'>>([]);
   const [activeTagPoolCategory, setActiveTagPoolCategory] = useState<string | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -174,7 +174,9 @@ export default function PersonaLibrary() {
   const hashString = (s: string) => s.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
   const pickByHash = (options: string[], seed: string) => options[hashString(seed) % options.length];
   const deriveTagValue = (p: Persona, field: TagField) => pickByHash(field.options, `${p.id}-${p.name}-${field.key}`);
-  const selectedTagCount = Object.keys(selectedTagValues).length + selectedProvenance.length;
+  const selectedTagCount =
+    Object.values(selectedTagValues).reduce((count, values) => count + values.length, 0) +
+    selectedProvenance.length;
   const getRadarTotal = (radar: number[]) => sumRadarTiers(radarValuesToTiers(radar));
   const radarTotalMax = radarChartLabels.length * RADAR_TIER_MAX;
   const personaTagKeywordMap: Partial<Record<string, string[]>> = {
@@ -230,13 +232,13 @@ export default function PersonaLibrary() {
       result = result.filter((p) => selectedProvenance.includes(p.provenance));
     }
 
-    const selectedEntries = Object.entries(selectedTagValues).filter(([, v]) => !!v && v !== '全部');
+    const selectedEntries = Object.entries(selectedTagValues).filter(([, values]) => values.length > 0);
     if (selectedEntries.length > 0) {
       result = result.filter((p) =>
-        selectedEntries.every(([key, value]) => {
+        selectedEntries.every(([key, values]) => {
           const field = allFieldMap.get(key);
           if (!field) return true;
-          return deriveTagValue(p, field) === value;
+          return values.includes(deriveTagValue(p, field));
         }),
       );
     }
@@ -581,14 +583,14 @@ export default function PersonaLibrary() {
                   信源：{provenanceLabel[p]}
                 </span>
               ))}
-              {Object.entries(selectedTagValues).map(([key, value]) => {
+              {Object.entries(selectedTagValues).flatMap(([key, values]) => {
                 const field = allFieldMap.get(key);
-                if (!field || !value) return null;
-                return (
-                  <span key={key} className="text-[12px] font-semibold text-primary">
+                if (!field || values.length === 0) return [];
+                return values.map((value) => (
+                  <span key={`${key}-${value}`} className="text-[12px] font-semibold text-primary">
                     {field.label}：{value}
                   </span>
-                );
+                ));
               })}
               {selectedProvenance.length === 0 && Object.keys(selectedTagValues).length === 0 && (
                 <span className="text-[11px] text-gray-500">暂无筛选条件</span>
