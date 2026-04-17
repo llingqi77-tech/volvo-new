@@ -1,5 +1,6 @@
 import {
   Fragment,
+  type Key,
   useCallback,
   useLayoutEffect,
   useRef,
@@ -9,6 +10,8 @@ import {
 } from 'react';
 import type { FilterGroup } from '../data/personaFilterSchema';
 
+type MultiTagValues = Record<string, string[]>;
+
 export function PersonaTagCategoryRow({
   group,
   isPoolOpen,
@@ -17,10 +20,11 @@ export function PersonaTagCategoryRow({
   onPoolEnter,
   onPoolLeave,
 }: {
+  key?: Key;
   group: FilterGroup;
   isPoolOpen: boolean;
-  selectedTagValues: Record<string, string[]>;
-  setSelectedTagValues: Dispatch<SetStateAction<Record<string, string[]>>>;
+  selectedTagValues: MultiTagValues;
+  setSelectedTagValues: Dispatch<SetStateAction<MultiTagValues>>;
   onPoolEnter: (category: string) => void;
   onPoolLeave: () => void;
 }) {

@@ -175,7 +175,7 @@ export default function PersonaLibrary() {
   const pickByHash = (options: string[], seed: string) => options[hashString(seed) % options.length];
   const deriveTagValue = (p: Persona, field: TagField) => pickByHash(field.options, `${p.id}-${p.name}-${field.key}`);
   const selectedTagCount =
-    Object.values(selectedTagValues).reduce((count, values) => count + values.length, 0) +
+    (Object.values(selectedTagValues) as string[][]).reduce((count, values) => count + values.length, 0) +
     selectedProvenance.length;
   const getRadarTotal = (radar: number[]) => sumRadarTiers(radarValuesToTiers(radar));
   const radarTotalMax = radarChartLabels.length * RADAR_TIER_MAX;
@@ -232,7 +232,8 @@ export default function PersonaLibrary() {
       result = result.filter((p) => selectedProvenance.includes(p.provenance));
     }
 
-    const selectedEntries = Object.entries(selectedTagValues).filter(([, values]) => values.length > 0);
+    const selectedEntries = (Object.entries(selectedTagValues) as Array<[string, string[]]>)
+      .filter(([, values]) => values.length > 0);
     if (selectedEntries.length > 0) {
       result = result.filter((p) =>
         selectedEntries.every(([key, values]) => {
@@ -583,7 +584,7 @@ export default function PersonaLibrary() {
                   信源：{provenanceLabel[p]}
                 </span>
               ))}
-              {Object.entries(selectedTagValues).flatMap(([key, values]) => {
+              {(Object.entries(selectedTagValues) as Array<[string, string[]]>).flatMap(([key, values]) => {
                 const field = allFieldMap.get(key);
                 if (!field || values.length === 0) return [];
                 return values.map((value) => (

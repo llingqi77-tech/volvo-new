@@ -3,12 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
-import Sidebar from './components/Sidebar';
+import { useState } from 'react';
+import TopNavBar, { type AppModule } from './components/TopNavBar';
 import KnowledgeBase from './pages/KnowledgeBase';
 import PersonaLibrary from './pages/PersonaLibrary';
-import ProfileCenter from './pages/ProfileCenter';
 import ResearchProjects from './pages/ResearchProjects';
+import LandingPage from './pages/LandingPage';
+import AIPanel from './pages/AIPanel';
+import AISage from './pages/AISage';
 
 export type KnowledgeDoc = {
   id: string;
@@ -23,17 +25,8 @@ export type KnowledgeDoc = {
   fileSize?: string;
 };
 
-export type TaskStatus = 'all' | 'reviewed' | 'archived';
-export type ResearchTask = {
-  id: string;
-  title: string;
-  updatedAt: string;
-  status: TaskStatus;
-};
-
 export default function App() {
-  const [activeModule, setActiveModule] = useState('knowledge');
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [activeModule, setActiveModule] = useState<AppModule>('landing');
   const [docs, setDocs] = useState<KnowledgeDoc[]>([
     // 洞察报告库 (14个)
     { id: 'doc-1', title: '2024年全球纯电SUV市场趋势深度调研', type: 'PDF • 14.2 MB • 2024-11-24', tags: ['电动化', 'SUV'], uploader: '王安德', color: 'text-primary', category: '洞察报告库', summary: '本报告深入分析了2024年全球纯电SUV市场的发展趋势，涵盖市场规模、消费者偏好、技术创新和竞争格局。研究发现，中国和欧洲市场增长最快，智能化和续航能力成为核心竞争力。', uploadDate: '2024-11-24', fileSize: '14.2 MB' },
@@ -80,27 +73,22 @@ export default function App() {
     { id: 'doc-39', title: '新能源汽车保险定价模型研究', type: 'PDF • 8.9 MB • 2024-10-25', tags: ['保险', '定价'], uploader: '张薇', color: 'text-gray-400', category: '行业知识库', summary: '电动车维修成本高、零部件价格贵导致保险费率偏高。基于驾驶行为的UBI保险和针对电池的专项保险是创新方向。', uploadDate: '2024-10-25', fileSize: '8.9 MB' },
     { id: 'doc-40', title: '碳交易市场对汽车行业的影响', type: 'PDF • 11.5 MB • 2024-10-22', tags: ['碳交易', 'ESG'], uploader: '刘建平', color: 'text-gray-400', category: '行业知识库', summary: '碳交易市场将碳排放转化为经济成本，推动车企加速电动化转型。新能源汽车积分可交易，成为车企重要收入来源。', uploadDate: '2024-10-22', fileSize: '11.5 MB' },
   ]);
-  const [tasks, setTasks] = useState<ResearchTask[]>([
-    { id: 't1', title: '2024 纯电豪华 SUV 市场竞争力分析', updatedAt: '今天 10:24', status: 'all' },
-    { id: 't2', title: '北欧用户智能座舱偏好研究', updatedAt: '昨天 18:32', status: 'all' },
-    { id: 't3', title: '高净值人群购车决策路径洞察', updatedAt: '2天前 14:03', status: 'reviewed' },
-    { id: 't4', title: '亚太市场 VOC 聚类分析', updatedAt: '5天前 09:21', status: 'archived' },
-  ]);
   const handleLogout = () => {
     window.alert('已退出登录（演示）');
   };
 
   return (
-    <div className="flex h-screen bg-background text-text-main font-sans overflow-hidden">
-      <Sidebar
+    <div className="h-screen bg-background text-text-main font-sans overflow-hidden">
+      <TopNavBar
         activeModule={activeModule}
         setActiveModule={setActiveModule}
-        isCollapsed={isSidebarCollapsed}
-        onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
         onLogout={handleLogout}
       />
-      <div className="relative flex min-h-0 flex-1 flex-col">
+      <div className="relative flex min-h-0 h-[calc(100vh-4rem)] flex-col">
         <main className="min-h-0 flex-1 overflow-y-auto">
+          {activeModule === 'landing' && (
+            <LandingPage onStartResearch={() => setActiveModule('insight-research')} />
+          )}
           {activeModule === 'knowledge' && <KnowledgeBase docs={docs} setDocs={setDocs} />}
           {activeModule === 'persona' && <PersonaLibrary />}
           {activeModule === 'insight-research' && (
@@ -108,12 +96,8 @@ export default function App() {
               <ResearchProjects entryMode="insight" />
             </div>
           )}
-          {activeModule === 'profile-info' && <ProfileCenter section="info" />}
-          {activeModule === 'profile-research' && (
-            <div className="h-full min-h-0">
-              <ResearchProjects entryMode="insight" />
-            </div>
-          )}
+          {activeModule === 'ai-panel' && <AIPanel />}
+          {activeModule === 'ai-sage' && <AISage />}
         </main>
       </div>
     </div>

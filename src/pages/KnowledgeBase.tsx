@@ -277,14 +277,14 @@ export default function KnowledgeBase({
                     e.stopPropagation();
                     setSelectedDocId(doc.id);
                   }}
-                  className="px-2 py-1 text-xs rounded bg-surface-hover text-gray-300 hover:text-white transition-colors"
+                  className="whitespace-nowrap px-2 py-1 text-xs rounded bg-surface-hover text-gray-300 hover:text-white transition-colors"
                   title="查看详情"
                 >
                   查看详情
                 </button>
                 <button
                   type="button"
-                  className="px-2 py-1 text-xs rounded bg-surface-hover text-gray-300 hover:text-red-400 transition-colors"
+                  className="whitespace-nowrap px-2 py-1 text-xs rounded bg-surface-hover text-gray-300 hover:text-red-400 transition-colors"
                   title="删除文档"
                   onClick={(e) => {
                     e.stopPropagation();

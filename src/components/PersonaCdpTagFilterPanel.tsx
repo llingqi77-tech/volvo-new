@@ -73,7 +73,7 @@ export function PersonaCdpTagFilterPanel({
               信源：{provenanceLabel[p]}
             </span>
           ))}
-          {Object.entries(selectedTagValues).flatMap(([key, values]) => {
+          {(Object.entries(selectedTagValues) as Array<[string, string[]]>).flatMap(([key, values]) => {
             const field = allFieldMap.get(key);
             if (!field || !Array.isArray(values) || values.length === 0) return [];
             return values.map((value) => (
