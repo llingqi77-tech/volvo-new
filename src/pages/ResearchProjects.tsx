@@ -79,10 +79,12 @@ function getHistoryStatusLabel(project: ResearchProject) {
 }
 
 function getHistoryStatusClass(label: string) {
-  if (label === '已发布') return 'bg-indigo-500/20 text-indigo-300';
+  if (label === '已发布') return 'border border-[var(--status-done-border)] bg-[var(--status-done-bg)] text-[var(--status-done-text)]';
   if (label === '未发布') return 'border border-amber-500/30 bg-amber-500/10 text-amber-300';
-  if (TIMELINE_STAGES.includes(label as TimelineStageLabel)) return 'bg-emerald-500/20 text-emerald-300';
-  return 'bg-gray-500/20 text-gray-300';
+  if (TIMELINE_STAGES.includes(label as TimelineStageLabel)) {
+    return 'border border-[var(--status-active-border)] bg-[var(--status-active-bg)] text-[var(--status-active-text)]';
+  }
+  return 'border border-[var(--status-idle-border)] bg-[var(--status-idle-bg)] text-[var(--status-idle-text)]';
 }
 
 function stageToTimelineIndex(stage: ProjectStage) {
@@ -573,7 +575,7 @@ function SelectionQuestion({
               }}
               className={`w-full ${optionBaseClass} ${
                 isSelected
-                  ? 'border-primary bg-primary/10 text-primary'
+                  ? 'selection-active-option border-primary bg-primary/10 text-primary'
                   : 'border-white/10 bg-white/5 text-gray-200 hover:bg-white/10'
               } ${readOnly ? 'cursor-default' : ''}`}
             >
@@ -715,6 +717,16 @@ export default function ResearchProjects({
   const lastAutoScrollMessageCountRef = useRef(0);
   const lastStageProjectIdRef = useRef<string | null>(null);
   const lastStageRef = useRef<ProjectStage | null>(null);
+  const STAGE_FLOW_ORDER: ProjectStage[] = ['intentClarify', 'fullTimeSourceSelect', 'fullDomainSourceSelect', 'insightSearchReport', 'topicExplore', 'plan', 'persona', 'interviewOutline', 'interviewExecution', 'materialUpload', 'report'];
+
+  const isNearChatBottom = (el: HTMLDivElement, threshold = 120) =>
+    el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
+
+  const scrollChatToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    const el = chatScrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior });
+  };
 
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId) ?? null,
@@ -917,7 +929,11 @@ export default function ResearchProjects({
       messageCount > lastAutoScrollMessageCountRef.current;
 
     if (shouldAutoScroll) {
-      chatScrollRef.current?.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: 'smooth' });
+      const el = chatScrollRef.current;
+      const isProjectSwitched = projectId !== lastAutoScrollProjectIdRef.current;
+      if (!el || isProjectSwitched || isNearChatBottom(el)) {
+        scrollChatToBottom('smooth');
+      }
     }
 
     lastAutoScrollProjectIdRef.current = projectId;
@@ -929,16 +945,15 @@ export default function ResearchProjects({
     const sameProject = lastStageProjectIdRef.current === activeProject.id;
     const prevStage = lastStageRef.current;
     const stageChanged = sameProject && prevStage !== activeProject.stage;
+    const prevStageIdx = prevStage ? STAGE_FLOW_ORDER.indexOf(prevStage) : -1;
+    const currentStageIdx = STAGE_FLOW_ORDER.indexOf(activeProject.stage);
     const shouldStickToBottomOnForwardStage =
       stageChanged &&
-      prevStage === 'topicExplore' &&
-      activeProject.stage === 'plan';
+      prevStageIdx >= 0 &&
+      currentStageIdx > prevStageIdx;
 
     if (shouldStickToBottomOnForwardStage) {
-      chatScrollRef.current?.scrollTo({
-        top: chatScrollRef.current.scrollHeight,
-        behavior: 'auto',
-      });
+      scrollChatToBottom('auto');
     }
 
     lastStageProjectIdRef.current = activeProject.id;
@@ -1532,6 +1547,9 @@ export default function ResearchProjects({
         },
       ],
     }));
+    window.requestAnimationFrame(() => {
+      scrollChatToBottom('smooth');
+    });
   };
 
   const onTimelineDotClick = (idx: number) => {
@@ -2552,7 +2570,7 @@ export default function ResearchProjects({
                           }}
                           className={`${optionBaseClass} ${
                             isSelected
-                              ? 'border-primary bg-primary/10 text-primary'
+                              ? 'selection-active-option border-primary bg-primary/10 text-primary'
                               : 'border-white/10 bg-white/5 text-gray-200'
                           } ${!isActive ? 'cursor-default' : ''}`}
                         >
@@ -2586,7 +2604,7 @@ export default function ResearchProjects({
                           }
                           className={`${optionBaseClass} ${
                             isSelected
-                              ? 'border-primary bg-primary/10 text-primary'
+                              ? 'selection-active-option border-primary bg-primary/10 text-primary'
                               : 'border-white/10 bg-white/5 text-gray-200'
                           } ${!isActive ? 'cursor-default' : ''}`}
                         >
@@ -2648,7 +2666,7 @@ export default function ResearchProjects({
                           }
                           className={`${optionBaseClass} text-center ${
                             isSelected
-                              ? 'border-primary bg-primary/10 text-primary'
+                              ? 'selection-active-option border-primary bg-primary/10 text-primary'
                               : 'border-white/10 bg-white/5 text-gray-200'
                           } ${!isActive ? 'cursor-default' : ''}`}
                         >
@@ -2685,7 +2703,7 @@ export default function ResearchProjects({
                           }
                           className={`${optionBaseClass} ${
                             isSelected
-                              ? 'border-primary bg-primary/10 text-primary'
+                              ? 'selection-active-option border-primary bg-primary/10 text-primary'
                               : 'border-white/10 bg-white/5 text-gray-200'
                           } ${!isActive ? 'cursor-default' : ''}`}
                         >
@@ -2834,7 +2852,7 @@ export default function ResearchProjects({
                       }}
                       className={`block w-full rounded-lg border px-3 py-2 text-left text-xs transition-colors ${
                         p.topicExplore.confirmedTopic === suggestion
-                          ? 'border-primary bg-primary/10 text-primary'
+                          ? 'selection-active-option border-primary bg-primary/10 text-primary'
                           : 'border-white/10 bg-white/5 text-gray-200 hover:bg-white/10'
                       }`}
                     >
@@ -2904,7 +2922,7 @@ export default function ResearchProjects({
                       >
                         <span
                           className={`mb-1 whitespace-nowrap text-[11px] font-semibold ${
-                            isCurrent ? 'text-purple-300' : isDone ? 'text-gray-200' : 'text-gray-500'
+                            isCurrent ? 'text-[var(--status-active-text)]' : isDone ? 'text-gray-200' : 'text-gray-500'
                           }`}
                         >
                           {label}
@@ -2914,8 +2932,12 @@ export default function ResearchProjects({
                             <Check size={16} strokeWidth={3} />
                           </div>
                         ) : isCurrent ? (
-                          <div className="flex h-9 w-9 items-center justify-center rounded-full border border-purple-500/45 bg-purple-500/10 p-[3px] shadow-[0_0_0_2px_rgba(139,92,246,0.18)]">
-                            <div className="flex h-full w-full items-center justify-center rounded-full border border-purple-500/45 bg-purple-500/15 text-sm font-bold text-purple-300">
+                          <div className="relative flex h-9 w-9 items-center justify-center rounded-full border border-[var(--status-active-border)] bg-[var(--status-active-bg)] p-[3px]">
+                            <span
+                              aria-hidden="true"
+                              className="timeline-current-ring pointer-events-none absolute -inset-[3px] rounded-full"
+                            />
+                            <div className="relative flex h-full w-full items-center justify-center rounded-full border border-[var(--status-active-border)] bg-[var(--status-active-bg)] text-sm font-bold text-[var(--status-active-text)]">
                               {idx + 1}
                             </div>
                           </div>

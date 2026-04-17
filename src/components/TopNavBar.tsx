@@ -21,20 +21,36 @@ export default function TopNavBar({
   activeModule,
   setActiveModule,
   onGoLanding,
+  theme,
+  onThemeChange,
   onLogout,
 }: {
   activeModule: AppModule;
   setActiveModule: (module: AppModule) => void;
   onGoLanding: () => void;
+  theme: 'dark' | 'light';
+  onThemeChange: (theme: 'dark' | 'light') => void;
   onLogout: () => void;
 }) {
   const [isUserDrawerOpen, setIsUserDrawerOpen] = useState(false);
+  const [isUserDrawerVisible, setIsUserDrawerVisible] = useState(false);
+
+  const openUserDrawer = () => {
+    setIsUserDrawerVisible(true);
+    // Delay one frame so transition can run from initial transform state.
+    requestAnimationFrame(() => setIsUserDrawerOpen(true));
+  };
+
+  const closeUserDrawer = () => {
+    setIsUserDrawerOpen(false);
+    window.setTimeout(() => setIsUserDrawerVisible(false), 100);
+  };
 
   useEffect(() => {
     if (!isUserDrawerOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setIsUserDrawerOpen(false);
+        closeUserDrawer();
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -43,14 +59,14 @@ export default function TopNavBar({
 
   return (
     <>
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-background/95 backdrop-blur">
+      <header className="sticky top-0 z-40 border-b border-[var(--color-border)] bg-background/95 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
           <button
             type="button"
             className="text-left"
             onClick={onGoLanding}
           >
-            <span className="text-[19px] font-black tracking-tight text-white">
+            <span className="text-[19px] font-black tracking-tight text-text-main">
               Customer Insight Copilot
             </span>
           </button>
@@ -63,7 +79,7 @@ export default function TopNavBar({
                   key={item.id}
                   type="button"
                   onClick={() => setActiveModule(item.id)}
-                  className={`text-[15px] font-semibold transition-opacity text-white ${
+                  className={`text-[15px] font-semibold text-text-main transition-opacity ${
                     isActive ? 'opacity-100' : 'opacity-100 hover:opacity-85'
                   }`}
                 >
@@ -80,16 +96,16 @@ export default function TopNavBar({
             </div>
             <button
               type="button"
-              className="rounded-full p-2 text-gray-400 transition-colors hover:bg-white/5 hover:text-white"
+              className="rounded-full p-2 text-text-muted transition-colors hover:bg-surface-hover hover:text-text-main"
               aria-label="帮助中心"
             >
               <CircleHelp size={16} />
             </button>
             <button
               type="button"
-              className="rounded-full p-2 text-gray-400 transition-colors hover:bg-white/5 hover:text-white"
+              className="rounded-full p-2 text-text-muted transition-colors hover:bg-surface-hover hover:text-text-main"
               aria-label="打开用户菜单"
-              onClick={() => setIsUserDrawerOpen(true)}
+              onClick={openUserDrawer}
             >
               <Menu size={18} />
             </button>
@@ -97,16 +113,22 @@ export default function TopNavBar({
         </div>
       </header>
 
-      {isUserDrawerOpen && (
+      {isUserDrawerVisible && (
         <div className="fixed inset-0 z-50 flex justify-end">
           <button
             type="button"
             aria-label="关闭用户菜单"
-            className="flex-1 bg-black/45"
-            onClick={() => setIsUserDrawerOpen(false)}
+            className={`flex-1 bg-black/45 transition-opacity duration-100 ${
+              isUserDrawerOpen ? 'opacity-100' : 'opacity-0'
+            }`}
+            onClick={closeUserDrawer}
           />
-          <aside className="h-full w-[320px] border-l border-white/10 bg-[#14161d]">
-            <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+          <aside
+            className={`h-full w-[320px] border-l border-[var(--color-border)] bg-surface transition-transform duration-100 ease-out ${
+              isUserDrawerOpen ? 'translate-x-0' : 'translate-x-full'
+            }`}
+          >
+            <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-4">
               <div className="flex items-center gap-3">
                 <div className="h-9 w-9 overflow-hidden rounded-full border border-white/15 bg-surface">
                   <img
@@ -116,21 +138,21 @@ export default function TopNavBar({
                   />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-white">wangad@volvo.com</p>
+                  <p className="text-sm font-semibold text-text-main">wangad@volvo.com</p>
                   <p className="text-xs text-gray-500">个人</p>
                 </div>
               </div>
               <button
                 type="button"
-                className="rounded-full p-1.5 text-gray-400 hover:bg-white/5 hover:text-white"
-                onClick={() => setIsUserDrawerOpen(false)}
+                className="rounded-full p-1.5 text-text-muted hover:bg-surface-hover hover:text-text-main"
+                onClick={closeUserDrawer}
                 aria-label="关闭"
               >
                 <X size={16} />
               </button>
             </div>
 
-            <div className="border-b border-white/10 px-5 py-4">
+            <div className="border-b border-[var(--color-border)] px-5 py-4">
               <button
                 type="button"
                 className="flex w-full items-center justify-between rounded-lg py-1 text-left text-sm"
@@ -143,28 +165,44 @@ export default function TopNavBar({
               </button>
             </div>
 
-            <div className="border-b border-white/10 px-5 py-4">
+            <div className="border-b border-[var(--color-border)] px-5 py-4">
               <p className="mb-3 text-xs text-gray-500">账户</p>
               <button
                 type="button"
-                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-white"
+                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-text-muted hover:bg-surface-hover hover:text-text-main"
               >
                 <User size={15} />
                 账户
               </button>
             </div>
 
-            <div className="border-b border-white/10 px-5 py-4">
+            <div className="border-b border-[var(--color-border)] px-5 py-4">
               <p className="mb-3 text-xs text-gray-500">设置</p>
-              <button type="button" className="mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-white">
+              <button type="button" className="mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-text-muted hover:bg-surface-hover hover:text-text-main">
                 <Globe size={15} />
                 English
               </button>
-              <button type="button" className="mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-white">
+              <button
+                type="button"
+                onClick={() => onThemeChange('light')}
+                className={`mb-1 flex w-full items-center gap-2 rounded-md border px-2 py-2 text-sm transition-colors ${
+                  theme === 'light'
+                    ? 'border-primary/40 bg-primary/10 text-primary'
+                    : 'border-transparent text-text-muted hover:bg-surface-hover hover:text-text-main'
+                }`}
+              >
                 <Sun size={15} />
                 浅色主题
               </button>
-              <button type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-white">
+              <button
+                type="button"
+                onClick={() => onThemeChange('dark')}
+                className={`flex w-full items-center gap-2 rounded-md border px-2 py-2 text-sm transition-colors ${
+                  theme === 'dark'
+                    ? 'border-primary/40 bg-primary/10 text-primary'
+                    : 'border-transparent text-text-muted hover:bg-surface-hover hover:text-text-main'
+                }`}
+              >
                 <Moon size={15} />
                 深色主题
               </button>
@@ -174,10 +212,10 @@ export default function TopNavBar({
               <button
                 type="button"
                 onClick={() => {
-                  setIsUserDrawerOpen(false);
+                  closeUserDrawer();
                   onLogout();
                 }}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-white"
+                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-text-muted hover:bg-surface-hover hover:text-text-main"
               >
                 <LogOut size={15} />
                 退出登录

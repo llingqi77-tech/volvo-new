@@ -483,7 +483,11 @@ export default function PersonaLibrary({ onSubPageChange }: { onSubPageChange?: 
         <div className="bg-surface rounded-xl p-8 mb-6">
           <h1 className="text-3xl font-extrabold text-white mb-2">{getPersonaAlias(selectedPersona)} - 人设详情</h1>
           <div className="mt-2">
-            <span className={`inline-flex items-center px-2.5 py-1 rounded-full border text-xs font-bold ${provenanceBadgeClass[selectedPersona.provenance]}`}>
+            <span
+              className={`persona-source-pill inline-flex items-center px-2.5 py-1 rounded-full border text-xs font-bold ${
+                selectedPersona.provenance === 'first' ? 'persona-source-pill-first' : ''
+              } ${provenanceBadgeClass[selectedPersona.provenance]}`}
+            >
               信源：{provenanceLabel[selectedPersona.provenance]}
             </span>
           </div>
@@ -495,7 +499,7 @@ export default function PersonaLibrary({ onSubPageChange }: { onSubPageChange?: 
               <div className="flex flex-wrap gap-2">
                 {personaDisplayTags.length > 0 ? (
                   personaDisplayTags.map((tag) => (
-                    <span key={tag} className="px-3 py-1 rounded border border-primary/40 bg-primary/15 text-xs text-primary">
+                    <span key={tag} className="persona-neutral-pill px-3 py-1 rounded border border-primary/40 bg-primary/15 text-xs text-primary">
                       {tag}
                     </span>
                   ))
@@ -510,7 +514,7 @@ export default function PersonaLibrary({ onSubPageChange }: { onSubPageChange?: 
                 <span className="text-sm font-bold text-white">人设关键词：</span>
                 {vocKeywords.length > 0 ? (
                   vocKeywords.map((kw) => (
-                    <span key={kw} className="px-2.5 py-1 rounded border border-primary/40 bg-primary/15 text-xs text-primary">
+                    <span key={kw} className="persona-neutral-pill px-2.5 py-1 rounded border border-primary/40 bg-primary/15 text-xs text-primary">
                       {kw}
                     </span>
                   ))
@@ -673,7 +677,11 @@ export default function PersonaLibrary({ onSubPageChange }: { onSubPageChange?: 
               className="bg-surface p-6 rounded-xl relative group text-left hover:bg-surface-hover transition-colors h-[174px] flex flex-col"
             >
               <div className="absolute top-6 right-6">
-                <span className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[11px] font-bold ${provenanceBadgeClass[p.provenance]}`}>
+                <span
+                  className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[11px] font-bold ${
+                    p.provenance === 'first' ? 'persona-source-pill-first' : ''
+                  } ${provenanceBadgeClass[p.provenance]}`}
+                >
                   {provenanceLabel[p.provenance]}
                 </span>
               </div>

@@ -8,6 +8,8 @@ import {
 
 type RadarRow = { subject: string; value: number; fullMark: number };
 const PRIMARY_HEX = '#1bff1b';
+const RADAR_LABEL_COLOR = 'var(--radar-axis-label-color, #d1d5db)';
+const RADAR_RADIUS_TICK_COLOR = 'var(--radar-radius-tick-color, #e5e7eb)';
 
 function RadarAngleTick(props: {
   x?: number;
@@ -22,7 +24,7 @@ function RadarAngleTick(props: {
   const tier = row?.value ?? 0;
   return (
     <text x={x} y={y} textAnchor={textAnchor} className="recharts-text recharts-polar-angle-axis-tick-value">
-      <tspan x={x} dy="-0.45em" fill="#d1d5db" fontSize={11}>
+      <tspan x={x} dy="-0.45em" fill={RADAR_LABEL_COLOR} fontSize={11}>
         {label}
       </tspan>
       <tspan x={x} dy="1.15em" fill={PRIMARY_HEX} fontSize={12} fontWeight={700}>
@@ -70,7 +72,7 @@ export function PersonaRadarChart({
               angle={90}
               domain={[0, RADAR_TIER_MAX]}
               ticks={[0, 1, 2, 3]}
-              tick={{ fill: '#e5e7eb', fontSize: 10 }}
+              tick={{ fill: RADAR_RADIUS_TICK_COLOR, fontSize: 10 }}
               axisLine={false}
             />
             <Radar

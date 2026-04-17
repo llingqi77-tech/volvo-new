@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import TopNavBar, { type AppModule } from './components/TopNavBar';
 import KnowledgeBase from './pages/KnowledgeBase';
 import PersonaLibrary from './pages/PersonaLibrary';
@@ -25,8 +25,15 @@ export type KnowledgeDoc = {
   fileSize?: string;
 };
 
+type ThemeMode = 'dark' | 'light';
+
 export default function App() {
   const [activeModule, setActiveModule] = useState<AppModule>('landing');
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    if (typeof window === 'undefined') return 'dark';
+    const stored = window.localStorage.getItem('volvo-theme-mode');
+    return stored === 'light' ? 'light' : 'dark';
+  });
   const [isSubPage, setIsSubPage] = useState(false);
   const [moduleResetVersion, setModuleResetVersion] = useState({
     knowledge: 0,
@@ -88,6 +95,11 @@ export default function App() {
     setIsSubPage(false);
   };
 
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    window.localStorage.setItem('volvo-theme-mode', theme);
+  }, [theme]);
+
   const goLandingAndReset = () => {
     if (activeModule === 'knowledge' || activeModule === 'persona' || activeModule === 'insight-research') {
       setModuleResetVersion((prev) => ({
@@ -106,6 +118,8 @@ export default function App() {
           activeModule={activeModule}
           setActiveModule={handleModuleChange}
           onGoLanding={goLandingAndReset}
+          theme={theme}
+          onThemeChange={setTheme}
           onLogout={handleLogout}
         />
       )}

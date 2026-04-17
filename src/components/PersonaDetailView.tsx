@@ -75,7 +75,9 @@ export function PersonaDetailView({
         <h1 className="text-3xl font-extrabold text-white mb-2">{getPersonaAlias(persona)} - 人设详情</h1>
         <div className="mt-2">
           <span
-            className={`inline-flex items-center px-2.5 py-1 rounded-full border text-xs font-bold ${provenanceBadgeClass[persona.provenance]}`}
+            className={`persona-source-pill inline-flex items-center px-2.5 py-1 rounded-full border text-xs font-bold ${
+              persona.provenance === 'first' ? 'persona-source-pill-first' : ''
+            } ${provenanceBadgeClass[persona.provenance]}`}
           >
             信源：{provenanceLabel[persona.provenance]}
           </span>
@@ -90,7 +92,7 @@ export function PersonaDetailView({
                 displayTags.map((tag) => (
                   <span
                     key={tag}
-                    className="px-3 py-1 rounded border border-primary/40 bg-primary/15 text-xs text-primary"
+                    className="persona-neutral-pill px-3 py-1 rounded border border-primary/40 bg-primary/15 text-xs text-primary"
                   >
                     {tag}
                   </span>
@@ -108,7 +110,7 @@ export function PersonaDetailView({
                 vocKeywords.map((kw) => (
                   <span
                     key={kw}
-                    className="px-2.5 py-1 rounded border border-primary/40 bg-primary/15 text-xs text-primary"
+                    className="persona-neutral-pill px-2.5 py-1 rounded border border-primary/40 bg-primary/15 text-xs text-primary"
                   >
                     {kw}
                   </span>
