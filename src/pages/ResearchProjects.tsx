@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Archive, ArchiveRestore, ArrowLeft, Bot, BookmarkPlus, Check, Download, FileText, History, Plus, Search, Send, Share2 } from 'lucide-react';
 import { PersonaCdpTagFilterPanel } from '../components/PersonaCdpTagFilterPanel';
@@ -17,6 +17,7 @@ import {
   createEmptyProject,
   defaultIntentQuestions,
   formatProjectTime,
+  projectStageLabel,
   readResearchProjects,
   type ChatMessage,
   type ChatMessageVariant,
@@ -33,7 +34,7 @@ import {
 const PERSONA_CARD_TAG_CLASS = 'px-2 py-1 bg-surface-hover text-gray-300 text-xs rounded';
 
 type EntryMode = 'insight' | 'projects';
-type RightPanelSection = 'plan' | 'persona' | 'outline' | 'interview' | 'report';
+type RightPanelSection = 'insightSearchReport' | 'plan' | 'persona' | 'outline' | 'interview' | 'report';
 type VolvoPresetDimension = '产品创新' | '新品测试' | '竞品分析' | '用户旅程研究';
 type VolvoPresetCase = {
   id: string;
@@ -50,6 +51,7 @@ const FULL_WIDTH_CHAT_STAGES: ResearchProject['stage'][] = [
   'intentClarify',
   'fullTimeSourceSelect',
   'fullDomainSourceSelect',
+  'insightSearchReport',
   'topicExplore',
 ];
 
@@ -61,6 +63,7 @@ const STAGE_BADGE_LABELS: Record<ProjectStage, string> = {
   intentClarify: '洞察搜索',
   fullTimeSourceSelect: '洞察搜索',
   fullDomainSourceSelect: '洞察搜索',
+  insightSearchReport: '洞察搜索',
   topicExplore: '洞察搜索',
   plan: '方案设计',
   persona: '人群筛选',
@@ -83,6 +86,7 @@ function getHistoryStatusClass(label: string) {
 }
 
 function stageToTimelineIndex(stage: ProjectStage) {
+  if (stage === 'insightSearchReport') return 0;
   if (stage === 'plan') return 1;
   if (stage === 'persona') return 2;
   if (stage === 'interviewOutline') return 3;
@@ -153,6 +157,38 @@ function buildSourceSummary(project: ResearchProject) {
           project.fullDomainSource.source === 'firstParty' ? '一方' : '一方+三方'
         }，时间范围${timeRangeLabel(project.fullDomainSource.timeRange)}`;
   return `${fullTime}\n${fullDomain}`;
+}
+
+function buildInsightSearchReport(project: ResearchProject) {
+  const fullTimeSkip = project.fullTimeSource.mode === 'skip';
+  const fullDomainSkip = project.fullDomainSource.mode === 'skip';
+  const sourceSummary = buildSourceSummary(project);
+  const intentSummary = buildIntentSummary(project).split('\n').slice(0, 3).join('；');
+  const confidenceBase = fullTimeSkip || fullDomainSkip ? '中' : '中高';
+  const suggestions = [
+    '围绕冲突信号补充一轮定向追问，优先验证最影响业务决策的假设',
+    '将已选数据来源与后续访谈样本规则绑定，减少样本偏差造成的结论漂移',
+    '进入正式研究主题后，先锁定 1-2 个高优先级问题再扩展覆盖范围',
+  ];
+
+  return [
+    '洞察搜索报告',
+    `生成时间：${formatProjectTime(Date.now())}`,
+    '',
+    '一、研究意图摘要',
+    intentSummary,
+    '',
+    '二、已选洞察范围',
+    sourceSummary,
+    '',
+    '三、洞察搜索结论',
+    `1) 来源覆盖判断：${fullTimeSkip && fullDomainSkip ? '覆盖不足（双跳过）' : fullTimeSkip || fullDomainSkip ? '覆盖部分缺失' : '覆盖较完整'}`,
+    `2) 当前证据强度：${confidenceBase}置信度，适合进入正式研究主题继续收敛`,
+    `3) 风险提示：${fullTimeSkip && fullDomainSkip ? '双跳过会显著降低主题收敛效率与后续方案可信度' : '需关注来源偏差与时间窗口带来的判断偏移'}`,
+    '',
+    '四、进入主题建议',
+    ...suggestions.map((item, idx) => `${idx + 1}. ${item}`),
+  ].join('\n');
 }
 
 function buildTopicSuggestions(project: ResearchProject) {
@@ -648,7 +684,13 @@ function ThinkingCard({ text, onComplete }: { text: string; onComplete?: () => v
   );
 }
 
-export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?: EntryMode }) {
+export default function ResearchProjects({
+  entryMode = 'insight',
+  onSubPageChange,
+}: {
+  entryMode?: EntryMode;
+  onSubPageChange?: (isSubPage: boolean) => void;
+}) {
   const [projects, setProjects] = useState<ResearchProject[]>(() => readResearchProjects());
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [homeView, setHomeView] = useState<'insight' | 'history'>(entryMode === 'projects' ? 'history' : 'insight');
@@ -669,11 +711,19 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const interviewContentPanelRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const lastAutoScrollProjectIdRef = useRef<string | null>(null);
+  const lastAutoScrollMessageCountRef = useRef(0);
+  const lastStageProjectIdRef = useRef<string | null>(null);
+  const lastStageRef = useRef<ProjectStage | null>(null);
 
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId) ?? null,
     [projects, activeProjectId],
   );
+
+  useEffect(() => {
+    onSubPageChange?.(activeProjectId !== null);
+  }, [activeProjectId, onSubPageChange]);
 
   const filteredHistoryProjects = useMemo(() => {
     const keyword = historyKeyword.trim().toLowerCase();
@@ -749,6 +799,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
     const stageCycle: ProjectStage[] = [
       'fullTimeSourceSelect',
       'fullDomainSourceSelect',
+      'insightSearchReport',
       'topicExplore',
       'plan',
       'persona',
@@ -794,11 +845,20 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
         stage: normalizedStage,
         topicExplore: {
           ...base.topicExplore,
-          confirmedTopic: ['fullTimeSourceSelect', 'fullDomainSourceSelect'].includes(stage) ? '' : topic,
+          confirmedTopic: ['fullTimeSourceSelect', 'fullDomainSourceSelect', 'insightSearchReport'].includes(stage) ? '' : topic,
           suggestions: stage === 'topicExplore' ? buildTopicSuggestions(topicProject) : base.topicExplore.suggestions,
         },
+        insightSearchReportStage: {
+          report: ['topicExplore', 'plan', 'persona', 'interviewOutline', 'interviewExecution', 'materialUpload', 'report'].includes(stage)
+            ? buildInsightSearchReport(topicProject)
+            : '',
+          autoGenerated: ['topicExplore', 'plan', 'persona', 'interviewOutline', 'interviewExecution', 'materialUpload', 'report'].includes(stage),
+          generatedAt: ['topicExplore', 'plan', 'persona', 'interviewOutline', 'interviewExecution', 'materialUpload', 'report'].includes(stage)
+            ? t
+            : undefined,
+        },
         planStage: {
-          plan: ['fullTimeSourceSelect', 'fullDomainSourceSelect', 'topicExplore'].includes(stage) ? null : plan,
+          plan: ['fullTimeSourceSelect', 'fullDomainSourceSelect', 'insightSearchReport', 'topicExplore'].includes(stage) ? null : plan,
           confirmed: ['persona', 'interviewOutline', 'interviewExecution', 'materialUpload', 'report'].includes(stage),
         },
         personaStage: {
@@ -850,8 +910,40 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
   }, [projects.length]);
 
   useEffect(() => {
-    chatScrollRef.current?.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [activeProject?.prePersonaMessages, activeProject?.stage]);
+    const projectId = activeProject?.id ?? null;
+    const messageCount = activeProject?.prePersonaMessages.length ?? 0;
+    const shouldAutoScroll =
+      projectId !== lastAutoScrollProjectIdRef.current ||
+      messageCount > lastAutoScrollMessageCountRef.current;
+
+    if (shouldAutoScroll) {
+      chatScrollRef.current?.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: 'smooth' });
+    }
+
+    lastAutoScrollProjectIdRef.current = projectId;
+    lastAutoScrollMessageCountRef.current = messageCount;
+  }, [activeProject?.id, activeProject?.prePersonaMessages.length]);
+
+  useLayoutEffect(() => {
+    if (!activeProject) return;
+    const sameProject = lastStageProjectIdRef.current === activeProject.id;
+    const prevStage = lastStageRef.current;
+    const stageChanged = sameProject && prevStage !== activeProject.stage;
+    const shouldStickToBottomOnForwardStage =
+      stageChanged &&
+      prevStage === 'topicExplore' &&
+      activeProject.stage === 'plan';
+
+    if (shouldStickToBottomOnForwardStage) {
+      chatScrollRef.current?.scrollTo({
+        top: chatScrollRef.current.scrollHeight,
+        behavior: 'auto',
+      });
+    }
+
+    lastStageProjectIdRef.current = activeProject.id;
+    lastStageRef.current = activeProject.stage;
+  }, [activeProject?.id, activeProject?.stage]);
 
   useEffect(() => {
     if (!activeProject) return;
@@ -934,6 +1026,27 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
           ],
         }));
       }
+    }
+    if (activeProject.stage === 'insightSearchReport' && !activeProject.insightSearchReportStage.report.trim()) {
+      const t = Date.now();
+      updateProject(activeProject.id, (project) => ({
+        ...project,
+        insightSearchReportStage: {
+          report: buildInsightSearchReport(project),
+          autoGenerated: true,
+          generatedAt: t,
+        },
+        prePersonaMessages: [
+          ...project.prePersonaMessages,
+          {
+            id: `insight-report-auto-${t}`,
+            role: 'assistant',
+            variant: 'insight_search_report_card',
+            text: '洞察范围已确认，已自动生成洞察搜索报告。请先确认报告，再进入正式研究主题。',
+            createdAt: t,
+          },
+        ],
+      }));
     }
     if (activeProject.stage === 'plan' && !activeProject.planStage.plan) {
       updateProject(activeProject.id, (project) => ({
@@ -1062,7 +1175,8 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
 
   useEffect(() => {
     if (!activeProject) return;
-    if (activeProject.stage === 'plan') setRightPanelSection('plan');
+    if (activeProject.stage === 'insightSearchReport') setRightPanelSection('insightSearchReport');
+    else if (activeProject.stage === 'plan') setRightPanelSection('plan');
     else if (activeProject.stage === 'persona') setRightPanelSection('persona');
     else if (activeProject.stage === 'interviewOutline') setRightPanelSection('outline');
     else if (activeProject.stage === 'interviewExecution') setRightPanelSection('interview');
@@ -1792,8 +1906,33 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
     );
   }
 
+  function renderInsightSearchReportRightColumn(p: ResearchProject) {
+    if (!p.insightSearchReportStage.report.trim()) return null;
+    const reportText = p.insightSearchReportStage.report;
+    return (
+      <div className="chat-scroll-area h-full overflow-y-auto rounded-xl border border-white/10 bg-white p-5 text-black shadow-lg">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h4 className="text-lg font-extrabold">洞察搜索报告</h4>
+          <button
+            type="button"
+            onClick={() => downloadTextFile(`${p.title}-洞察搜索报告.txt`, reportText)}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-300 text-zinc-700 hover:bg-zinc-100"
+            title="下载"
+            aria-label="下载洞察搜索报告"
+          >
+            <Download size={14} />
+          </button>
+        </div>
+        <p className="text-xs text-zinc-500">生成时间：{formatProjectTime(p.insightSearchReportStage.generatedAt ?? Date.now())}</p>
+        <div className="mt-5 whitespace-pre-wrap text-sm leading-7 text-zinc-800">{reportText}</div>
+      </div>
+    );
+  }
+
   function renderRightFilterBar() {
-    if (!activeProject?.planStage.plan) return null;
+    const hasInsightSearchReport = Boolean(activeProject?.insightSearchReportStage.report.trim());
+    const hasPlan = Boolean(activeProject?.planStage.plan);
+    if (!hasInsightSearchReport && !hasPlan) return null;
     const canOpenReport = activeProject.stage === 'report' && rightPanelSection === 'report' && activeProject.reportStage.report.trim();
     return (
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -1803,6 +1942,9 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
           disabled={isReviewMode}
           className="rounded-lg border border-white/20 bg-surface px-3 py-2 text-sm text-white outline-none focus:border-primary disabled:opacity-50"
         >
+          {hasInsightSearchReport ? (
+            <option value="insightSearchReport" className="bg-surface text-white">洞察搜索报告</option>
+          ) : null}
           <option value="plan" className="bg-surface text-white">调研方案</option>
           <option value="persona" className="bg-surface text-white">人设信息</option>
           <option value="outline" className="bg-surface text-white">访谈大纲</option>
@@ -1849,6 +1991,7 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
   function renderCrossStagePanel() {
     if (!activeProject) return null;
     const hasAnyOutput =
+      Boolean(activeProject.insightSearchReportStage.report.trim()) ||
       Boolean(activeProject.planStage.plan) ||
       activeProject.personaStage.personas.length > 0 ||
       Boolean(activeProject.interviewOutlineStage.outline.trim()) ||
@@ -1856,6 +1999,11 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
       Boolean(activeProject.reportStage.report.trim());
     if (!hasAnyOutput) {
       return renderRightPanelEmpty('研究产出将在此展示');
+    }
+    if (rightPanelSection === 'insightSearchReport') {
+      return activeProject.insightSearchReportStage.report.trim()
+        ? renderInsightSearchReportRightColumn(activeProject)
+        : renderRightPanelEmpty('洞察搜索报告尚未生成。');
     }
     if (rightPanelSection === 'plan') {
       return activeProject.planStage.plan ? renderPlanRightColumn(activeProject) : renderRightPanelEmpty('调研方案尚未生成。');
@@ -1992,6 +2140,22 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
               className={buttonClass}
             >
               确认研究计划并进入人群筛选
+            </button>
+          </div>
+        </AssistantAvatarRow>
+      );
+    }
+
+    if (activeProject.stage === 'insightSearchReport') {
+      return (
+        <AssistantAvatarRow>
+          <div className={cardClass}>
+            <button
+              type="button"
+              onClick={continueToTopicAfterInsightReport}
+              className={buttonClass}
+            >
+              确认洞察搜索报告并进入正式研究主题
             </button>
           </div>
         </AssistantAvatarRow>
@@ -2168,18 +2332,48 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
   function continueToTopicFromDomain() {
     const t = Date.now();
     const u = `全域：${domainSourceLabel}；时间：${timeRangeLabel(activeProject.fullDomainSource.timeRange)}`;
+    const shouldSkipInsightSearchReport =
+      activeProject.fullTimeSource.mode === 'skip' && activeProject.fullDomainSource.mode === 'skip';
+    const insightSearchReport = buildInsightSearchReport(activeProject);
     updateProject(activeProject.id, (project) => ({
       ...project,
-      stage: 'topicExplore',
+      stage: shouldSkipInsightSearchReport ? 'topicExplore' : 'insightSearchReport',
       fullDomainSource: { ...project.fullDomainSource, completed: true },
+      insightSearchReportStage: shouldSkipInsightSearchReport
+        ? project.insightSearchReportStage
+        : {
+            report: insightSearchReport,
+            autoGenerated: true,
+            generatedAt: t + 1,
+          },
       prePersonaMessages: [
         ...project.prePersonaMessages,
         { id: `fd-u-${t}`, role: 'user', text: u, createdAt: t },
         {
           id: `fd-a-${t + 1}`,
           role: 'assistant',
-          text: '洞察范围已确认。接下来在下方输入框与我对话，并在对话流中选择或收敛正式研究主题。',
+          variant: shouldSkipInsightSearchReport ? undefined : 'insight_search_report_card',
+          text: shouldSkipInsightSearchReport
+            ? '洞察范围已确认（全时与全域均完全不选），已跳过洞察搜索报告。接下来在下方输入框与我对话，并在对话流中选择或收敛正式研究主题。'
+            : '洞察范围已确认，已自动生成洞察搜索报告。请先确认报告，再进入正式研究主题。',
           createdAt: t + 1,
+        },
+      ],
+    }));
+  }
+
+  function continueToTopicAfterInsightReport() {
+    const t = Date.now();
+    updateProject(activeProject.id, (project) => ({
+      ...project,
+      stage: 'topicExplore',
+      prePersonaMessages: [
+        ...project.prePersonaMessages,
+        {
+          id: `insight-report-next-${t}`,
+          role: 'assistant',
+          text: '洞察搜索报告已确认。接下来在下方输入框与我对话，并在对话流中选择或收敛正式研究主题。',
+          createdAt: t,
         },
       ],
     }));
@@ -2531,6 +2725,30 @@ export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?
             <p className="mt-1 text-sm font-bold text-primary">{message.text}</p>
             <p className="mt-1 text-xs text-gray-400">点击查看右侧各人设的具体访谈内容</p>
           </button>
+        </AssistantAvatarRow>
+      );
+    }
+
+    if (message.variant === 'insight_search_report_card') {
+      if (shouldWaitForPrevThinking) return null;
+      const isActive = p.stage === 'insightSearchReport';
+      return (
+        <AssistantAvatarRow showIdentity={showIdentity}>
+          <div className="w-full max-w-lg rounded-2xl border border-primary/45 bg-primary/10 px-4 py-3 shadow-[0_0_0_1px_rgba(27,255,27,0.12)]">
+            <p className="text-sm text-gray-100">{message.text}</p>
+            <div className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3 text-xs text-gray-200">
+              <pre className="whitespace-pre-wrap font-sans">{p.insightSearchReportStage.report || '报告生成中...'}</pre>
+            </div>
+            {isActive && (
+              <button
+                type="button"
+                onClick={continueToTopicAfterInsightReport}
+                className="mt-3 w-full rounded-lg bg-primary py-2.5 text-sm font-bold text-black hover:bg-primary/90"
+              >
+                进入正式研究主题
+              </button>
+            )}
+          </div>
         </AssistantAvatarRow>
       );
     }

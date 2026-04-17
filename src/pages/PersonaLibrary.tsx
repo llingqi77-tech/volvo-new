@@ -13,7 +13,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url
 ).toString();
 
-export default function PersonaLibrary() {
+export default function PersonaLibrary({ onSubPageChange }: { onSubPageChange?: (isSubPage: boolean) => void }) {
   // 筛选状态
   const [selectedTagValues, setSelectedTagValues] = useState<Record<string, string[]>>({});
   const [selectedProvenance, setSelectedProvenance] = useState<Array<'first' | 'third' | 'deep_interview'>>([]);
@@ -268,6 +268,10 @@ export default function PersonaLibrary() {
     () => allPersonas.find((p) => p.id === selectedPersonaId) ?? null,
     [allPersonas, selectedPersonaId],
   );
+
+  useEffect(() => {
+    onSubPageChange?.(selectedPersonaId !== null);
+  }, [onSubPageChange, selectedPersonaId]);
 
   const onPickPdfFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;

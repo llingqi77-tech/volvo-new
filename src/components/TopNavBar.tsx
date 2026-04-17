@@ -20,10 +20,12 @@ const navItems: Array<{ id: AppModule; label: string }> = [
 export default function TopNavBar({
   activeModule,
   setActiveModule,
+  onGoLanding,
   onLogout,
 }: {
   activeModule: AppModule;
   setActiveModule: (module: AppModule) => void;
+  onGoLanding: () => void;
   onLogout: () => void;
 }) {
   const [isUserDrawerOpen, setIsUserDrawerOpen] = useState(false);
@@ -46,7 +48,7 @@ export default function TopNavBar({
           <button
             type="button"
             className="text-left"
-            onClick={() => setActiveModule('landing')}
+            onClick={onGoLanding}
           >
             <span className="text-[19px] font-black tracking-tight text-white">
               Customer Insight Copilot

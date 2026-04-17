@@ -27,6 +27,12 @@ export type KnowledgeDoc = {
 
 export default function App() {
   const [activeModule, setActiveModule] = useState<AppModule>('landing');
+  const [isSubPage, setIsSubPage] = useState(false);
+  const [moduleResetVersion, setModuleResetVersion] = useState({
+    knowledge: 0,
+    persona: 0,
+    'insight-research': 0,
+  });
   const [docs, setDocs] = useState<KnowledgeDoc[]>([
     // 洞察报告库 (14个)
     { id: 'doc-1', title: '2024年全球纯电SUV市场趋势深度调研', type: 'PDF • 14.2 MB • 2024-11-24', tags: ['电动化', 'SUV'], uploader: '王安德', color: 'text-primary', category: '洞察报告库', summary: '本报告深入分析了2024年全球纯电SUV市场的发展趋势，涵盖市场规模、消费者偏好、技术创新和竞争格局。研究发现，中国和欧洲市场增长最快，智能化和续航能力成为核心竞争力。', uploadDate: '2024-11-24', fileSize: '14.2 MB' },
@@ -77,23 +83,58 @@ export default function App() {
     window.alert('已退出登录（演示）');
   };
 
+  const handleModuleChange = (module: AppModule) => {
+    setActiveModule(module);
+    setIsSubPage(false);
+  };
+
+  const goLandingAndReset = () => {
+    if (activeModule === 'knowledge' || activeModule === 'persona' || activeModule === 'insight-research') {
+      setModuleResetVersion((prev) => ({
+        ...prev,
+        [activeModule]: prev[activeModule] + 1,
+      }));
+    }
+    setActiveModule('landing');
+    setIsSubPage(false);
+  };
+
   return (
     <div className="h-screen bg-background text-text-main font-sans overflow-hidden">
-      <TopNavBar
-        activeModule={activeModule}
-        setActiveModule={setActiveModule}
-        onLogout={handleLogout}
-      />
-      <div className="relative flex min-h-0 h-[calc(100vh-4rem)] flex-col">
+      {!isSubPage && (
+        <TopNavBar
+          activeModule={activeModule}
+          setActiveModule={handleModuleChange}
+          onGoLanding={goLandingAndReset}
+          onLogout={handleLogout}
+        />
+      )}
+      <div className={`relative flex min-h-0 flex-col ${isSubPage ? 'h-screen' : 'h-[calc(100vh-4rem)]'}`}>
         <main className="min-h-0 flex-1 overflow-y-auto">
           {activeModule === 'landing' && (
-            <LandingPage onStartResearch={() => setActiveModule('insight-research')} />
+            <LandingPage onStartResearch={() => handleModuleChange('insight-research')} />
           )}
-          {activeModule === 'knowledge' && <KnowledgeBase docs={docs} setDocs={setDocs} />}
-          {activeModule === 'persona' && <PersonaLibrary />}
+          {activeModule === 'knowledge' && (
+            <KnowledgeBase
+              key={`knowledge-${moduleResetVersion.knowledge}`}
+              docs={docs}
+              setDocs={setDocs}
+              onSubPageChange={setIsSubPage}
+            />
+          )}
+          {activeModule === 'persona' && (
+            <PersonaLibrary
+              key={`persona-${moduleResetVersion.persona}`}
+              onSubPageChange={setIsSubPage}
+            />
+          )}
           {activeModule === 'insight-research' && (
             <div className="h-full min-h-0">
-              <ResearchProjects entryMode="insight" />
+              <ResearchProjects
+                key={`insight-research-${moduleResetVersion['insight-research']}`}
+                entryMode="insight"
+                onSubPageChange={setIsSubPage}
+              />
             </div>
           )}
           {activeModule === 'ai-panel' && <AIPanel />}

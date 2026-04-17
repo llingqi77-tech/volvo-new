@@ -1,4 +1,4 @@
-import { Dispatch, SetStateAction, useRef, useState } from 'react';
+import { Dispatch, SetStateAction, useEffect, useRef, useState } from 'react';
 import { Upload, Search, FileText, TrendingUp, FolderOpen, FileUp, Folder, ArrowLeft, Download, Calendar, User as UserIcon } from 'lucide-react';
 import Modal from '../components/Modal';
 import type { KnowledgeDoc } from '../App';
@@ -6,9 +6,11 @@ import type { KnowledgeDoc } from '../App';
 export default function KnowledgeBase({
   docs,
   setDocs,
+  onSubPageChange,
 }: {
   docs: KnowledgeDoc[];
   setDocs: Dispatch<SetStateAction<KnowledgeDoc[]>>;
+  onSubPageChange?: (isSubPage: boolean) => void;
 }) {
   const [activeCategory, setActiveCategory] = useState('全库文档');
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -21,6 +23,10 @@ export default function KnowledgeBase({
   const folderInputRef = useRef<HTMLInputElement>(null);
 
   const selectedDoc = docs.find(d => d.id === selectedDocId);
+
+  useEffect(() => {
+    onSubPageChange?.(selectedDocId !== null);
+  }, [onSubPageChange, selectedDocId]);
 
   // 如果选中了文档，显示详情页
   if (selectedDoc) {
