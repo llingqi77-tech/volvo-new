@@ -33,9 +33,9 @@ export function getPersonaCardTitle(
 }
 
 export const provenanceLabel: Record<PersonaProvenance, string> = {
-  first: '一方',
+  first: 'CDP-VOC',
   third: '三方',
-  deep_interview: '深度访谈',
+  deep_interview: '手动上传',
 };
 
 export const provenanceBadgeClass: Record<PersonaProvenance, string> = {

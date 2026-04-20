@@ -94,8 +94,8 @@ export function PersonaCdpTagFilterPanel({
         </div>
         <div className="col-span-10 flex flex-wrap items-center gap-[3px] gap-y-1 text-[11px] text-gray-300 leading-5">
           {([
-            { id: 'first' as const, label: '一方' },
-            { id: 'deep_interview' as const, label: '深度访谈' },
+            { id: 'first' as const, label: 'CDP-VOC' },
+            { id: 'deep_interview' as const, label: '手动上传' },
           ]).map((opt, idx, arr) => {
             const active = selectedProvenance.includes(opt.id);
             return (

@@ -39,7 +39,7 @@ export default function KnowledgeBase({
   const onPickFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
 
-    const pdfFiles: File[] = [];
+    const validFiles: File[] = [];
     const invalidFiles: string[] = [];
     const oversizedFiles: string[] = [];
     const maxSizeMB = 20;
@@ -48,7 +48,20 @@ export default function KnowledgeBase({
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
 
-      if (file.type !== 'application/pdf') {
+      const lowerName = file.name.toLowerCase();
+      const isPdf = file.type === 'application/pdf' || lowerName.endsWith('.pdf');
+      const isWord =
+        file.type === 'application/msword' ||
+        file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+        lowerName.endsWith('.doc') ||
+        lowerName.endsWith('.docx');
+      const isExcel =
+        file.type === 'application/vnd.ms-excel' ||
+        file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+        lowerName.endsWith('.xls') ||
+        lowerName.endsWith('.xlsx');
+
+      if (!isPdf && !isWord && !isExcel) {
         invalidFiles.push(file.name);
         continue;
       }
@@ -58,12 +71,12 @@ export default function KnowledgeBase({
         continue;
       }
 
-      pdfFiles.push(file);
+      validFiles.push(file);
     }
 
     let alertMessage = '';
     if (invalidFiles.length > 0) {
-      alertMessage += `以下文件不是 PDF 格式，已跳过：\n${invalidFiles.join('\n')}\n\n`;
+      alertMessage += `以下文件不是 PDF/Word/Excel 格式，已跳过：\n${invalidFiles.join('\n')}\n\n`;
     }
     if (oversizedFiles.length > 0) {
       alertMessage += `以下文件超过 ${maxSizeMB} MB 限制，已跳过：\n${oversizedFiles.join('\n')}`;
@@ -73,8 +86,8 @@ export default function KnowledgeBase({
       window.alert(alertMessage.trim());
     }
 
-    if (pdfFiles.length > 0) {
-      setSelectedUploadFiles(prev => [...prev, ...pdfFiles]);
+    if (validFiles.length > 0) {
+      setSelectedUploadFiles(prev => [...prev, ...validFiles]);
     }
   };
 
@@ -312,7 +325,7 @@ export default function KnowledgeBase({
           <input
             ref={uploadInputRef}
             type="file"
-            accept=".pdf,application/pdf"
+            accept=".pdf,.doc,.docx,.xls,.xlsx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             multiple
             className="hidden"
             onChange={(e) => onPickFiles(e.target.files)}
@@ -320,7 +333,7 @@ export default function KnowledgeBase({
           <input
             ref={folderInputRef}
             type="file"
-            accept=".pdf,application/pdf"
+            accept=".pdf,.doc,.docx,.xls,.xlsx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             // @ts-ignore - webkitdirectory is not in TypeScript types
             webkitdirectory="true"
             directory="true"
@@ -337,8 +350,8 @@ export default function KnowledgeBase({
             className="border-2 border-dashed border-white/20 rounded-xl p-8 flex flex-col items-center justify-center hover:border-primary/50 transition-colors cursor-pointer"
           >
             <FileUp className="text-primary mb-3" size={32} />
-            <p className="text-white font-bold mb-1">点击或拖拽 PDF 至此</p>
-            <p className="text-gray-500 text-xs mb-3">支持多个文件同时上传（最大 20MB/个）</p>
+            <p className="text-white font-bold mb-1">点击或拖拽 PDF/Word/Excel 至此</p>
+            <p className="text-gray-500 text-xs mb-3">支持多个文件同时上传（PDF/Word/Excel，最大 20MB/个）</p>
             <div className="flex gap-3">
               <button
                 type="button"

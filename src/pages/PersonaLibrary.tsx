@@ -19,6 +19,10 @@ export default function PersonaLibrary({ onSubPageChange }: { onSubPageChange?: 
   const [selectedProvenance, setSelectedProvenance] = useState<Array<'first' | 'third' | 'deep_interview'>>([]);
   const [activeTagPoolCategory, setActiveTagPoolCategory] = useState<string | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isBatchSelectMode, setIsBatchSelectMode] = useState(false);
+  const [selectedPersonaIds, setSelectedPersonaIds] = useState<string[]>([]);
+  const [isBatchTagModalOpen, setIsBatchTagModalOpen] = useState(false);
+  const [batchTagInput, setBatchTagInput] = useState('');
   const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
   const [isPersonaChatOpen, setIsPersonaChatOpen] = useState(false);
   const [personaChatInput, setPersonaChatInput] = useState('');
@@ -47,9 +51,9 @@ export default function PersonaLibrary({ onSubPageChange }: { onSubPageChange?: 
   };
 
   const provenanceLabel: Record<PersonaProvenance, string> = {
-    first: '一方',
+    first: 'CDP-VOC',
     third: '三方',
-    deep_interview: '深度访谈',
+    deep_interview: '手动上传',
   };
 
   const provenanceBadgeClass: Record<PersonaProvenance, string> = {
@@ -254,6 +258,8 @@ export default function PersonaLibrary({ onSubPageChange }: { onSubPageChange?: 
     const start = (safePersonaListPage - 1) * PERSONA_LIST_PAGE_SIZE;
     return filteredPersonas.slice(start, start + PERSONA_LIST_PAGE_SIZE);
   }, [filteredPersonas, safePersonaListPage]);
+  const selectedPersonaIdSet = useMemo(() => new Set(selectedPersonaIds), [selectedPersonaIds]);
+  const selectedCount = selectedPersonaIds.length;
 
   useEffect(() => {
     setPersonaListPage(1);
@@ -282,9 +288,15 @@ export default function PersonaLibrary({ onSubPageChange }: { onSubPageChange?: 
     const valid: File[] = [];
     for (let i = 0; i < files.length; i += 1) {
       const file = files[i];
-      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-      if (!isPdf) {
-        window.alert('请上传 PDF 文件');
+      const lowerName = file.name.toLowerCase();
+      const isPdf = file.type === 'application/pdf' || lowerName.endsWith('.pdf');
+      const isWord =
+        file.type === 'application/msword' ||
+        file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+        lowerName.endsWith('.doc') ||
+        lowerName.endsWith('.docx');
+      if (!isPdf && !isWord) {
+        window.alert('请上传 PDF/Word 文件');
         continue;
       }
       if (file.size > maxSizeBytes) {
@@ -311,6 +323,69 @@ export default function PersonaLibrary({ onSubPageChange }: { onSubPageChange?: 
     setSelectedProvenance([]);
     setSelectedTagValues({});
     setActiveTagPoolCategory(null);
+  };
+
+  const toggleBatchSelectMode = () => {
+    setIsBatchSelectMode((prev) => {
+      const next = !prev;
+      if (!next) {
+        setSelectedPersonaIds([]);
+      }
+      return next;
+    });
+  };
+
+  const clearSelectedPersonas = () => {
+    setSelectedPersonaIds([]);
+  };
+
+  const handlePersonaCardClick = (personaId: string) => {
+    if (!isBatchSelectMode) {
+      setSelectedPersonaId(personaId);
+      return;
+    }
+    setSelectedPersonaIds((prev) =>
+      prev.includes(personaId) ? prev.filter((id) => id !== personaId) : [...prev, personaId],
+    );
+  };
+
+  const applyCustomTagsToSelectedPersonas = () => {
+    const parsed = batchTagInput
+      .split(/[\n,，、;；]+/)
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+    if (parsed.length === 0) {
+      window.alert('请先输入至少一个标签');
+      return;
+    }
+    if (parsed.length > 1) {
+      window.alert('每次只支持添加一个自定义标签');
+      return;
+    }
+    const [tag] = parsed;
+
+    if (selectedPersonaIds.length === 0) {
+      window.alert('请先选择要添加标签的人设');
+      return;
+    }
+
+    setAllPersonas((prev) =>
+      prev.map((persona) => {
+        if (!selectedPersonaIdSet.has(persona.id)) return persona;
+        const existingTagSet = new Set(persona.tags.map((tag) => tag.trim()));
+        const mergedTags = [...persona.tags];
+        if (!existingTagSet.has(tag)) {
+          mergedTags.push(tag);
+        }
+        return {
+          ...persona,
+          tags: mergedTags,
+        };
+      }),
+    );
+
+    setBatchTagInput('');
+    setIsBatchTagModalOpen(false);
   };
 
   const keepTagPoolOpen = (category: string) => {
@@ -341,7 +416,7 @@ export default function PersonaLibrary({ onSubPageChange }: { onSubPageChange?: 
 
   const handleCreatePersona = async () => {
     if (selectedPdfFiles.length === 0) {
-      window.alert('请先上传 PDF 文件');
+      window.alert('请先上传 PDF/Word 文件');
       return;
     }
 
@@ -350,18 +425,19 @@ export default function PersonaLibrary({ onSubPageChange }: { onSubPageChange?: 
       const createdBatch = [];
       for (let idx = 0; idx < selectedPdfFiles.length; idx += 1) {
         const file = selectedPdfFiles[idx];
-        const text = await extractPdfText(file);
-        const snippet = text ? text.slice(0, 200) : '已解析文档基础信息';
+        const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+        const text = isPdf ? await extractPdfText(file) : '';
+        const snippet = text ? text.slice(0, 200) : '已读取文档基础信息';
 
         const created = {
           id: `p-${Date.now()}-${idx}`,
-          name: file.name.replace(/\.pdf$/i, '').slice(0, 20) || '新建人设',
-          tags: ['PDF解析', '新建'],
+          name: file.name.replace(/\.(pdf|doc|docx)$/i, '').slice(0, 20) || '新建人设',
+          tags: [isPdf ? 'PDF解析' : '文档导入', '新建'],
           score: 8.6,
           conf: 90,
           category: '数字触点与线上行为',
           subCategory: '内容偏好',
-          cdpTags: ['PDF解析生成', '待补充画像', '自动识别'],
+          cdpTags: [isPdf ? 'PDF解析生成' : '手动上传导入', '待补充画像', '自动识别'],
           voc: `基于上传文档自动生成的人设。文档摘要：${snippet}...`,
           radar: [75, 78, 72, 70, 80, 76, 73],
           provenance: 'first' as const,
@@ -375,8 +451,8 @@ export default function PersonaLibrary({ onSubPageChange }: { onSubPageChange?: 
       setSelectedPdfFiles([]);
       setIsParsing(false);
     } catch (error) {
-      console.error('PDF 解析失败:', error);
-      window.alert('PDF 解析失败，请重试');
+      console.error('文档解析失败:', error);
+      window.alert('文档解析失败，请重试');
       setIsParsing(false);
     }
   };
@@ -564,7 +640,7 @@ export default function PersonaLibrary({ onSubPageChange }: { onSubPageChange?: 
           className="bg-primary text-black font-bold px-6 py-3 rounded flex items-center gap-2 hover:bg-primary/90 transition-colors"
         >
           <Plus size={20} />
-          新增人设
+          手动上传
         </button>
       </div>
 
@@ -581,6 +657,13 @@ export default function PersonaLibrary({ onSubPageChange }: { onSubPageChange?: 
                 className="shrink-0 rounded bg-primary px-3 py-1 text-sm font-bold text-black hover:bg-primary/90 transition-colors"
               >
                 取消筛选
+              </button>
+              <button
+                type="button"
+                onClick={toggleBatchSelectMode}
+                className="shrink-0 rounded bg-primary px-3 py-1 text-sm font-bold text-black hover:bg-primary/90 transition-colors"
+              >
+                批量添加自定义标签
               </button>
             </div>
             <div className="mb-2 text-sm font-bold text-gray-100">
@@ -605,6 +688,27 @@ export default function PersonaLibrary({ onSubPageChange }: { onSubPageChange?: 
                 <span className="text-[11px] text-gray-500">暂无筛选条件</span>
               )}
             </div>
+            {isBatchSelectMode && (
+              <div className="mt-3 flex flex-wrap items-center gap-2 border border-primary/25 bg-primary/5 rounded-lg px-3 py-2">
+                <span className="text-xs font-semibold text-primary">已选 {selectedCount} 个</span>
+                <button
+                  type="button"
+                  disabled={selectedCount === 0}
+                  onClick={() => setIsBatchTagModalOpen(true)}
+                  className="rounded bg-primary px-3 py-1 text-xs font-bold text-black hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  添加自定义标签
+                </button>
+                <button
+                  type="button"
+                  disabled={selectedCount === 0}
+                  onClick={clearSelectedPersonas}
+                  className="rounded bg-surface-hover px-3 py-1 text-xs font-semibold text-gray-300 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  清空选择
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-12 gap-2 items-center pb-3 mb-3 border-b border-white/10">
@@ -613,8 +717,8 @@ export default function PersonaLibrary({ onSubPageChange }: { onSubPageChange?: 
             </div>
             <div className="col-span-10 flex flex-wrap items-center gap-[3px] gap-y-1 text-[11px] text-gray-300 leading-5">
               {([
-                { id: 'first' as const, label: '一方' },
-                { id: 'deep_interview' as const, label: '深度访谈' },
+                { id: 'first' as const, label: 'CDP-VOC' },
+                { id: 'deep_interview' as const, label: '手动上传' },
               ]).map((opt, idx, arr) => {
                 const active = selectedProvenance.includes(opt.id);
                 return (
@@ -673,8 +777,12 @@ export default function PersonaLibrary({ onSubPageChange }: { onSubPageChange?: 
             <button
               key={p.id}
               type="button"
-              onClick={() => setSelectedPersonaId(p.id)}
-              className="bg-surface p-6 rounded-xl relative group text-left hover:bg-surface-hover transition-colors h-[174px] flex flex-col"
+              onClick={() => handlePersonaCardClick(p.id)}
+              className={`p-6 rounded-xl relative group text-left transition-colors h-[174px] flex flex-col border ${
+                selectedPersonaIdSet.has(p.id)
+                  ? 'bg-surface-hover border-primary/60 ring-1 ring-primary/40'
+                  : 'bg-surface border-transparent hover:bg-surface-hover'
+              }`}
             >
               <div className="absolute top-6 right-6">
                 <span
@@ -737,13 +845,13 @@ export default function PersonaLibrary({ onSubPageChange }: { onSubPageChange?: 
         )}
       </div>
 
-      <Modal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} title="新增人设">
+      <Modal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} title="手动上传">
         <div className="space-y-4">
           <input
             ref={uploadRef}
             type="file"
             multiple
-            accept=".pdf,application/pdf"
+            accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             className="hidden"
             onChange={(e) => onPickPdfFiles(e.target.files)}
           />
@@ -758,12 +866,12 @@ export default function PersonaLibrary({ onSubPageChange }: { onSubPageChange?: 
             className="border-2 border-dashed border-white/20 rounded-xl p-12 flex flex-col items-center justify-center hover:border-primary/50 transition-colors cursor-pointer"
           >
             <FileUp className="text-primary mb-4" size={40} />
-            <p className="text-white font-bold mb-2">点击或拖拽 PDF 至此</p>
-            <p className="text-gray-500 text-xs mb-1">系统将自动解析 PDF 内容生成人设</p>
-              <p className="text-gray-500 text-xs">支持批量上传PDF，最大20MB/个</p>
+            <p className="text-white font-bold mb-2">点击或拖拽 PDF/Word 至此</p>
+            <p className="text-gray-500 text-xs mb-1">系统将自动解析文档内容生成人设</p>
+            <p className="text-gray-500 text-xs">支持批量上传 PDF/Word，最大20MB/个</p>
             {selectedPdfFiles.length > 0 && (
               <div className="text-xs text-primary mt-3 w-full">
-                <p>已选择：{selectedPdfFiles.length} 个 PDF</p>
+                <p>已选择：{selectedPdfFiles.length} 个文件</p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {selectedPdfFiles.slice(0, 3).map((f) => (
                     <span key={`${f.name}-${f.size}`} className="px-2 py-1 bg-surface-hover text-gray-300 rounded">
@@ -781,7 +889,7 @@ export default function PersonaLibrary({ onSubPageChange }: { onSubPageChange?: 
           <div className="bg-surface-hover rounded-lg p-4">
             <p className="text-xs text-gray-400 leading-relaxed">
               <span className="text-primary font-bold">提示：</span>
-              上传的 PDF 可以是用户访谈记录、调研报告、客户画像文档等。系统会自动提取关键信息，生成结构化的人设模型。
+              上传的文档可以是用户访谈记录、调研报告、客户画像文档等（支持 PDF/Word）。系统会自动提取关键信息，生成结构化的人设模型。
             </p>
           </div>
 
@@ -801,6 +909,38 @@ export default function PersonaLibrary({ onSubPageChange }: { onSubPageChange?: 
               className="px-6 py-2 rounded-lg text-sm font-bold bg-primary text-black hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
               {isParsing ? '解析中...' : '生成人设'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={isBatchTagModalOpen} onClose={() => setIsBatchTagModalOpen(false)} title="添加自定义标签">
+        <div className="space-y-4">
+          <div className="text-xs text-gray-400 leading-relaxed">
+            为已选中的 <span className="text-primary font-bold">{selectedCount}</span> 个人设批量添加标签。
+            每次仅支持输入 1 个自定义标签。
+          </div>
+          <input
+            value={batchTagInput}
+            onChange={(e) => setBatchTagInput(e.target.value)}
+            placeholder="例如：高潜客"
+            className="w-full rounded-lg border border-white/10 bg-surface-hover px-3 py-2 text-sm text-white outline-none focus:border-primary"
+          />
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => setIsBatchTagModalOpen(false)}
+              className="px-5 py-2 rounded-lg text-sm font-bold text-gray-400 hover:text-white transition-colors"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={applyCustomTagsToSelectedPersonas}
+              disabled={selectedCount === 0}
+              className="px-5 py-2 rounded-lg text-sm font-bold bg-primary text-black hover:bg-primary/90 transition-colors disabled:opacity-50"
+            >
+              确认添加
             </button>
           </div>
         </div>
