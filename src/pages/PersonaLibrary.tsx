@@ -804,22 +804,22 @@ export default function PersonaLibrary({ onSubPageChange }: { onSubPageChange?: 
               key={p.id}
               type="button"
               onClick={() => handlePersonaCardClick(p.id)}
-              className={`p-6 rounded-xl relative group text-left transition-colors h-[174px] flex flex-col border ${
+              className={`p-6 rounded-xl group text-left transition-colors h-[174px] flex flex-col border ${
                 selectedPersonaIdSet.has(p.id)
                   ? 'bg-surface-hover border-primary/60 ring-1 ring-primary/40'
                   : 'bg-surface border-transparent hover:bg-surface-hover'
               }`}
             >
-              <div className="absolute top-6 right-6">
+              <div className="mb-2 flex items-start justify-between gap-2">
+                <h3 className="min-w-0 flex-1 text-2xl font-bold leading-tight text-white break-words">{getPersonaAlias(p)}</h3>
                 <span
-                  className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[11px] font-bold ${
+                  className={`shrink-0 inline-flex items-center px-2.5 py-1 rounded-full border text-[11px] font-bold ${
                     p.provenance === 'first' ? 'persona-source-pill-first' : ''
                   } ${provenanceBadgeClass[p.provenance]}`}
                 >
                   {provenanceLabel[p.provenance]}
                 </span>
               </div>
-              <h3 className="pr-16 text-2xl font-bold text-white mb-2">{getPersonaAlias(p)}</h3>
               <div className="mb-6 flex flex-wrap gap-2">
                 {getPersonaCardPreviewTags(p).map((tag, idx) => (
                   <span key={`${p.id}-card-tag-${idx}-${tag}`} className={personaCardTagClass}>

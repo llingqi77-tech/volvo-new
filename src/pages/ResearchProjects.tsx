@@ -3236,9 +3236,13 @@ export default function ResearchProjects({
                           personaStage: { ...project.personaStage, detailPersonaId: persona.id },
                         }))
                       }
-                      className="bg-surface p-6 rounded-xl relative group text-left hover:bg-surface-hover transition-colors"
+                      className="bg-surface p-6 rounded-xl group text-left hover:bg-surface-hover transition-colors"
                     >
-                      <div className="absolute top-4 right-4 flex items-center gap-2">
+                      <div className="mb-3 flex items-start justify-between gap-2">
+                        <h3 className="min-w-0 flex-1 text-2xl font-bold leading-tight text-white break-words">
+                          {getPersonaAlias(persona)}
+                        </h3>
+                        <div className="flex shrink-0 items-center gap-2">
                         <button
                           type="button"
                           disabled={isReviewMode}
@@ -3259,8 +3263,8 @@ export default function ResearchProjects({
                         <span className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[11px] font-bold ${provenanceBadgeClass[persona.provenance]}`}>
                           {provenanceLabel[persona.provenance]}
                         </span>
+                        </div>
                       </div>
-                      <h3 className="text-2xl font-bold text-white mb-3">{getPersonaAlias(persona)}</h3>
                       <div className="mb-8 flex flex-wrap gap-2">
                         {persona.tags.slice(0, 2).map((tag, tagIdx) => (
                           <span key={`${persona.id}-${tag}-${tagIdx}`} className={PERSONA_CARD_TAG_CLASS}>
