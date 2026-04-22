@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Google AI Studio App</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      // #region agent log
+      (function () {
+        fetch('http://127.0.0.1:7288/ingest/dbdc2c33-75d3-416a-ae77-97ee35b38cbf', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'af6d99' },
+          body: JSON.stringify({
+            sessionId: 'af6d99',
+            runId: 'pre-fix',
+            hypothesisId: 'H4',
+            location: 'index.html:inline',
+            message: 'Index HTML loaded',
+            data: {
+              href: window.location.href,
+              pathname: window.location.pathname,
+              baseURI: document.baseURI,
+              scriptSrc: '/src/main.tsx',
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(function () {});
+      })();
+      // #endregion agent log
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

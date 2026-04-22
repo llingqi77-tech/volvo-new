@@ -1,0 +1,1506 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ArrowLeft,
+  Bot,
+  CheckCircle2,
+  ChevronRight,
+  FileText,
+  Plus,
+  Send,
+  Users,
+} from 'lucide-react';
+import { PersonaCdpTagFilterPanel } from '../components/PersonaCdpTagFilterPanel';
+import { PersonaDetailView } from '../components/PersonaDetailView';
+import { filterSchema } from '../data/personaFilterSchema';
+import {
+  createEmptyProject,
+  formatProjectTime,
+  projectStageLabel,
+  readResearchProjects,
+  RESEARCH_PROJECTS_KEY,
+  type ChatMessage,
+  type ChoiceQuestion,
+  type InterviewPersona,
+  type ResearchPlan,
+  type ResearchProject,
+  type UploadedMaterial,
+  writeResearchProjects,
+} from '../utils/researchProjectStore';
+
+type EntryMode = 'insight' | 'projects';
+
+const stageFlow = [
+  'intentClarify',
+  'fullTimeSourceSelect',
+  'fullDomainSourceSelect',
+  'topicExplore',
+  'plan',
+  'persona',
+  'interviewOutline',
+  'materialUpload',
+  'report',
+] as const;
+
+const optionBaseClass =
+  'rounded-xl border px-4 py-3 text-left text-sm transition-colors';
+
+function questionAnswer(question: ChoiceQuestion, answers: Record<string, string[]>) {
+  return answers[question.id] ?? [];
+}
+
+function buildIntentSummary(project: ResearchProject) {
+  const lines = project.intentClarify.questions.map((question) => {
+    const answer = questionAnswer(question, project.intentClarify.answers);
+    return answer.length > 0 ? `${question.title}：${answer.join('、')}` : '';
+  }).filter(Boolean);
+  if (lines.length === 0) {
+    return '尚未完成研究意图澄清。';
+  }
+  return [
+    `围绕“${project.initialPrompt || project.title}”，当前已初步明确研究目标、对象与交付期待。`,
+    ...lines,
+    '建议基于以上结果选择合适的全时/全域洞察范围，再进入正式研究主题确认。',
+  ].join('\n');
+}
+
+function buildSourceSummary(project: ResearchProject) {
+  const fullTime =
+    project.fullTimeSource.mode === 'skip'
+      ? '全时洞察：完全不选'
+      : `全时洞察：${[
+          project.fullTimeSource.knowledgeScopes.insightReport ? '洞察报告库' : '',
+          project.fullTimeSource.knowledgeScopes.vehicleKnowledge ? '整车知识库' : '',
+          project.fullTimeSource.knowledgeScopes.industryKnowledge ? '行业知识库' : '',
+        ]
+          .filter(Boolean)
+          .join(' / ') || '未选知识库'}，垂媒检索${project.fullTimeSource.onlineSearch ? '开启' : '关闭'}`;
+  const fullDomain =
+    project.fullDomainSource.mode === 'skip'
+      ? '全域洞察：完全不选'
+      : `全域洞察：${
+          project.fullDomainSource.source === 'firstParty' ? '一方' : '一方+三方'
+        }，时间范围${timeRangeLabel(project.fullDomainSource.timeRange)}`;
+  return `${fullTime}\n${fullDomain}`;
+}
+
+function buildTopicSuggestions(project: ResearchProject) {
+  const base = project.initialPrompt || project.title;
+  const goal =
+    questionAnswer(project.intentClarify.questions[0], project.intentClarify.answers)[0] ?? '识别用户需求与痛点';
+  return [
+    `${base}相关用户的核心决策驱动与阻碍`,
+    `${base}在不同细分人群中的优先研究议题`,
+    `${goal}视角下的关键假设与验证路径`,
+    `${base}可优先展开的访谈主题`,
+  ];
+}
+
+function topicKickoffMessage(project: ResearchProject) {
+  return [
+    '我已基于前序研究意图澄清与洞察范围选择，整理出当前适合进入正式研究的候选方向。',
+    '',
+    buildIntentSummary(project),
+    '',
+    buildSourceSummary(project),
+    '',
+    '你可以直接选择候选主题，也可以继续和我对话，我会协助你收敛出正式调研主题。',
+  ].join('\n');
+}
+
+function buildTopicReply(project: ResearchProject, userInput: string) {
+  return [
+    `结合你刚才补充的“${userInput}”，我会优先把正式研究主题收敛到与业务决策更相关、可直接转成访谈与计划的方向。`,
+    '',
+    `当前建议主题：${userInput.length > 18 ? `${userInput.slice(0, 18)}...` : userInput} 的用户动机、分群差异与验证路径`,
+    '',
+    '如果你认同，可以直接确认该主题；如果你觉得还需要更聚焦，我可以继续把主题缩小到具体人群、场景或假设层面。',
+  ].join('\n');
+}
+
+function buildResearchPlan(project: ResearchProject): ResearchPlan {
+  const topic = project.topicExplore.confirmedTopic || project.initialPrompt || project.title;
+  const intent = buildIntentSummary(project).split('\n').slice(0, 2).join('；');
+  const sourceSummary = buildSourceSummary(project).replace(/\n/g, '；');
+  return {
+    summary: `本次研究围绕“${topic}”展开。系统将结合前序意图澄清与洞察范围选择，优先回答最影响业务判断的人群需求、关键分歧与验证路径。${intent}`,
+    objectives: [
+      `澄清“${topic}”对应的核心研究问题与业务决策边界`,
+      '识别不同细分人群在认知、动机与阻碍上的差异',
+      '形成后续访谈执行与结论沉淀所需的关键假设',
+    ],
+    methods: [
+      `洞察输入：${sourceSummary}`,
+      '访谈执行：围绕 20 个目标人设展开结构化深访',
+      '结果综合：整合线上洞察、访谈反馈与补充材料输出最终研究报告',
+    ],
+    sampleRules: [
+      '优先匹配 CDP 标签对应的人设库',
+      '若不足 20 个，则从社交媒体预存人设库拟合补足至 20 个',
+      '最终访谈人设总数固定控制在 20 个以内',
+    ],
+    outputs: [
+      '正式调研计划',
+      '20 个访谈人设清单',
+      '可修订的访谈大纲',
+      '最终研究报告',
+    ],
+  };
+}
+
+function pickRadar(seed: number) {
+  return [78, 82, 76, 80, 84, 79, 81].map((base, idx) => Math.min(96, base + ((seed + idx * 7) % 13)));
+}
+
+function buildPersonaCandidates(project: ResearchProject, tagOverrides: Record<string, string>) {
+  const topic = project.topicExplore.confirmedTopic || project.initialPrompt || project.title;
+  const cdpCount = project.fullTimeSource.mode === 'skip' && project.fullDomainSource.mode === 'skip' ? 8 : 12;
+  const total = 20;
+  const supplementCount = total - cdpCount;
+  const hintTags = Object.values(tagOverrides);
+  const personas: InterviewPersona[] = Array.from({ length: total }, (_, idx) => {
+    const social = idx >= cdpCount;
+    const names = ['陈思远', '林沐然', '周祺', '许悠然', '张逸豪', '宋致远', '李嘉禾', '赵以宁', '王若晨', '郑知夏'];
+    const titles = ['极客小远', '精致小林', '奶爸小周', '极简悠然', 'Z代小张', '口碑小宋', '白领嘉禾', '新锐以宁', '务实若晨', '理性知夏'];
+    const tagA = ['科技极客', '精致生活', '家庭安全', '环保主义', '都市先锋', '品牌认同', '效率导向', '审美敏感', '务实决策', '社媒活跃'];
+    const tagB = ['高净值', '安全控', '空间导向', '极简派', 'Z世代', '长期主义', '品质感', '材料敏感', '性价比', '新鲜感'];
+    const baseTagSet = [tagA[idx % tagA.length], tagB[idx % tagB.length]];
+    const cdpTags = [
+      social ? '社交媒体拟合' : 'CDP匹配',
+      topic.slice(0, 8) || '研究主题',
+      ...(hintTags.length > 0 ? hintTags.slice(0, 2) : social ? ['兴趣圈层', '内容互动'] : ['购车关注点', '生活方式']),
+    ];
+    return {
+      id: `persona-${idx + 1}`,
+      cardTitle: titles[idx % titles.length],
+      name: names[idx % names.length],
+      tags: baseTagSet,
+      score: Number((8.2 + ((idx % 7) * 0.18)).toFixed(1)),
+      conf: 88 + (idx % 9),
+      category: social ? '社交媒体补充拟合' : 'CDP 命中人设',
+      subCategory: social ? '社交画像拟合' : '标签命中',
+      cdpTags,
+      voc: social
+        ? `我在讨论“${topic.slice(0, 14) || '当前主题'}”时，更在意真实体验、情绪共鸣与可被验证的细节。`
+        : `围绕“${topic.slice(0, 14) || '当前主题'}”，我会同时考虑功能价值、使用场景与品牌可信度。`,
+      radar: pickRadar(idx + 3),
+      provenance: social ? (idx % 2 === 0 ? 'third' : 'deep_interview') : 'first',
+      sourcePool: social ? 'social' : 'cdp',
+    };
+  });
+  return {
+    personas,
+    matchedFromCdp: cdpCount,
+    supplementedFromSocial: supplementCount,
+  };
+}
+
+function buildInterviewOutline(project: ResearchProject) {
+  const topic = project.topicExplore.confirmedTopic || project.initialPrompt || project.title;
+  const selectedPersonas = project.personaStage.personas.filter((persona) =>
+    project.personaStage.selectedPersonaIds.includes(persona.id),
+  );
+  const samplePersonaNames = selectedPersonas.slice(0, 4).map((persona) => persona.cardTitle).join('、');
+  return [
+    `# ${topic} 访谈大纲`,
+    '',
+    '## 一、访谈目标',
+    `- 围绕“${topic}”验证核心动机、阻碍因素与决策差异`,
+    '- 对比不同人群在触发场景、评价标准和优先级上的差异',
+    '- 输出可直接进入最终研究报告的关键结论与原始证据',
+    '',
+    '## 二、目标人设',
+    `- 本轮访谈覆盖 20 个确认人设，重点包括：${samplePersonaNames || '待确认人设'}`,
+    '',
+    '## 三、访谈提纲',
+    '1. 破冰：请受访者描述与当前研究主题相关的真实场景与近期经历',
+    '2. 触发点：是什么让受访者开始关注这类问题或机会',
+    '3. 决策标准：受访者最看重哪些信息、体验或结果',
+    '4. 阻碍因素：哪些顾虑、风险或替代方案让其犹豫',
+    '5. 人群差异：哪些细分人群会给出明显不同的反馈',
+    '6. 收尾：如果让受访者提出一条建议，最希望系统或品牌改进什么',
+    '',
+    '## 四、记录要求',
+    '- 保留原话证据',
+    '- 标注情绪强度与场景上下文',
+    '- 对出现分歧的观点单独建档',
+  ].join('\n');
+}
+
+function buildFinalReport(project: ResearchProject) {
+  const topic = project.topicExplore.confirmedTopic || project.initialPrompt || project.title;
+  const plan = project.planStage.plan;
+  const selectedPersonas = project.personaStage.personas.filter((persona) =>
+    project.personaStage.selectedPersonaIds.includes(persona.id),
+  );
+  const uploadSummary =
+    project.materialUploadStage.files.length > 0
+      ? `已补充 ${project.materialUploadStage.files.length} 份线下访谈资料。`
+      : '未上传线下访谈资料，报告基于前序洞察、计划与人设结果综合生成。';
+  return [
+    `报告名称：${topic} 研究报告`,
+    `生成时间：${formatProjectTime(Date.now())}`,
+    '',
+    '一、研究背景',
+    `${buildIntentSummary(project).replace(/\n/g, ' ')}`,
+    '',
+    '二、洞察范围与正式研究主题',
+    buildSourceSummary(project),
+    '',
+    '三、正式研究主题',
+    topic,
+    '',
+    '四、调研计划摘要',
+    ...(plan ? [plan.summary, ...plan.objectives.map((item, idx) => `${idx + 1}. ${item}`)] : ['暂无计划摘要']),
+    '',
+    '五、访谈人设结构',
+    `共确认 ${selectedPersonas.length} 个访谈人设，其中 CDP 命中 ${project.personaStage.matchedFromCdp} 个，社媒拟合补足 ${project.personaStage.supplementedFromSocial} 个。`,
+    ...selectedPersonas.slice(0, 6).map((persona, idx) => `${idx + 1}. ${persona.cardTitle}：${persona.tags.join(' / ')}`),
+    '',
+    '六、访谈执行说明',
+    project.interviewOutlineStage.outline || '暂无访谈大纲',
+    '',
+    '七、补充资料情况',
+    uploadSummary,
+    '',
+    '八、结论建议',
+    '1. 先围绕高优先级人群与场景完成深访验证，再补充存在分歧的边缘假设。',
+    '2. 把洞察筛选与访谈原话结合，用于形成最终的业务建议与优先级排序。',
+    '3. 对未覆盖的资料来源保持追踪，后续可继续回到项目中追加材料与再生成报告。',
+  ].join('\n');
+}
+
+function nextStage(stage: ResearchProject['stage']) {
+  const currentIndex = stageFlow.indexOf(stage);
+  return stageFlow[Math.min(stageFlow.length - 1, currentIndex + 1)];
+}
+
+function timeRangeLabel(value: ResearchProject['fullDomainSource']['timeRange']) {
+  switch (value) {
+    case 'all':
+      return '全部时间';
+    case 'week':
+      return '近一周';
+    case 'month':
+      return '近一月';
+    case 'quarter':
+      return '近三月';
+    case 'halfYear':
+      return '近半年';
+    case 'year':
+      return '近一年';
+  }
+}
+
+function ProjectStagePills({ stage }: { stage: ResearchProject['stage'] }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {stageFlow.map((item, idx) => {
+        const currentIndex = stageFlow.indexOf(stage);
+        const active = item === stage;
+        const done = idx < currentIndex;
+        return (
+          <div
+            key={item}
+            className={`rounded-full border px-3 py-1.5 text-xs ${
+              active
+                ? 'border-primary bg-primary/10 text-primary'
+                : done
+                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                  : 'border-white/10 bg-white/5 text-gray-500'
+            }`}
+          >
+            {projectStageLabel(item)}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function SelectionQuestion({
+  title,
+  description,
+  options,
+  selected,
+  allowMultiple = false,
+  onChange,
+}: {
+  title: string;
+  description?: string;
+  options: string[];
+  selected: string[];
+  allowMultiple?: boolean;
+  onChange: (next: string[]) => void;
+}) {
+  return (
+    <div className="bg-surface rounded-xl border border-white/10 p-5">
+      <div className="mb-4">
+        <h3 className="text-sm font-bold text-white">{title}</h3>
+        {description ? <p className="mt-1 text-xs text-gray-400">{description}</p> : null}
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        {options.map((option) => {
+          const isSelected = selected.includes(option);
+          return (
+            <button
+              key={option}
+              type="button"
+              onClick={() => {
+                if (!allowMultiple) {
+                  onChange([option]);
+                  return;
+                }
+                if (option === '完全不选') {
+                  onChange(['完全不选']);
+                  return;
+                }
+                const set = new Set(selected);
+                if (set.has('完全不选')) set.delete('完全不选');
+                if (set.has(option)) {
+                  set.delete(option);
+                } else {
+                  set.add(option);
+                }
+                onChange(Array.from(set));
+              }}
+              className={`${optionBaseClass} ${
+                isSelected
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-white/10 bg-white/5 text-gray-200 hover:bg-white/10'
+              }`}
+            >
+              {option}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function formatBytes(bytes: number) {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.ceil(bytes / 1024)} KB`;
+  return `${bytes} B`;
+}
+
+export default function ResearchProjects({ entryMode = 'insight' }: { entryMode?: EntryMode }) {
+  const [projects, setProjects] = useState<ResearchProject[]>(() => readResearchProjects());
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [newPrompt, setNewPrompt] = useState('');
+  const [topicChatInput, setTopicChatInput] = useState('');
+  const [outlineDraft, setOutlineDraft] = useState('');
+  const [personaFiltersOpen, setPersonaFiltersOpen] = useState(false);
+  const [personaFilterValues, setPersonaFilterValues] = useState<Record<string, string>>({});
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const cdpFieldLabelMap = useMemo(
+    () => new Map(filterSchema.flatMap((group) => group.fields.map((field) => [field.key, field.label] as const))),
+    [],
+  );
+  const activeProject = useMemo(
+    () => projects.find((project) => project.id === activeProjectId) ?? null,
+    [projects, activeProjectId],
+  );
+
+  const persistProjects = (updater: ResearchProject[] | ((current: ResearchProject[]) => ResearchProject[])) => {
+    setProjects((current) => {
+      const nextProjects = typeof updater === 'function' ? updater(current) : updater;
+      writeResearchProjects(nextProjects);
+      return nextProjects;
+    });
+  };
+
+  const updateProject = (projectId: string, updater: (current: ResearchProject) => ResearchProject) => {
+    persistProjects((currentProjects) =>
+      currentProjects.map((project) =>
+        project.id === projectId
+          ? {
+              ...updater(project),
+              updatedAt: Date.now(),
+            }
+          : project,
+      ),
+    );
+  };
+
+  useEffect(() => {
+    if (!activeProject) return;
+    if (activeProject.stage === 'topicExplore' && activeProject.topicExplore.suggestions.length === 0) {
+      updateProject(activeProject.id, (project) => ({
+        ...project,
+        topicExplore: {
+          ...project.topicExplore,
+          summary: `${buildIntentSummary(project)}\n\n${buildSourceSummary(project)}`,
+          suggestions: buildTopicSuggestions(project),
+          messages:
+            project.topicExplore.messages.length > 0
+              ? project.topicExplore.messages
+              : [
+                  {
+                    id: `topic-kickoff-${Date.now()}`,
+                    role: 'assistant',
+                    text: topicKickoffMessage(project),
+                    createdAt: Date.now(),
+                  },
+                ],
+        },
+      }));
+    }
+    if (activeProject.stage === 'plan' && !activeProject.planStage.plan) {
+      updateProject(activeProject.id, (project) => ({
+        ...project,
+        planStage: {
+          plan: buildResearchPlan(project),
+          confirmed: false,
+        },
+      }));
+    }
+    if (activeProject.stage === 'persona' && activeProject.personaStage.personas.length === 0) {
+      const built = buildPersonaCandidates(activeProject, {});
+      updateProject(activeProject.id, (project) => ({
+        ...project,
+        personaStage: {
+          ...project.personaStage,
+          personas: built.personas,
+          matchedFromCdp: built.matchedFromCdp,
+          supplementedFromSocial: built.supplementedFromSocial,
+          selectedPersonaIds: built.personas.map((persona) => persona.id),
+          detailPersonaId: null,
+          confirmed: false,
+        },
+      }));
+    }
+    if (activeProject.stage === 'interviewOutline' && !activeProject.interviewOutlineStage.outline) {
+      const nextOutline = buildInterviewOutline(activeProject);
+      updateProject(activeProject.id, (project) => ({
+        ...project,
+        interviewOutlineStage: {
+          outline: nextOutline,
+          confirmed: false,
+        },
+      }));
+      setOutlineDraft(nextOutline);
+    }
+    if (activeProject.stage === 'report' && !activeProject.reportStage.report) {
+      updateProject(activeProject.id, (project) => ({
+        ...project,
+        reportStage: {
+          report: buildFinalReport(project),
+          generatedAt: Date.now(),
+        },
+      }));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProject?.id, activeProject?.stage]);
+
+  useEffect(() => {
+    if (activeProject?.stage === 'interviewOutline') {
+      setOutlineDraft(activeProject.interviewOutlineStage.outline);
+    }
+  }, [activeProject?.id, activeProject?.stage, activeProject?.interviewOutlineStage.outline]);
+
+  const createProject = () => {
+    const prompt = newPrompt.trim();
+    if (!prompt) {
+      window.alert('请先输入你希望系统帮助研究的问题或背景。');
+      return;
+    }
+    const nextProject = createEmptyProject(prompt);
+    persistProjects((currentProjects) => [nextProject, ...currentProjects]);
+    setActiveProjectId(nextProject.id);
+    setNewPrompt('');
+  };
+
+  const exitProject = () => {
+    setActiveProjectId(null);
+    setTopicChatInput('');
+    setOutlineDraft('');
+    setPersonaFiltersOpen(false);
+  };
+
+  const removeProject = (projectId: string) => {
+    persistProjects((currentProjects) => currentProjects.filter((project) => project.id !== projectId));
+    if (activeProjectId === projectId) {
+      setActiveProjectId(null);
+    }
+  };
+
+  if (!activeProject) {
+    return (
+      <div className="h-full overflow-y-auto p-8">
+        <div className="mx-auto max-w-7xl space-y-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-extrabold text-white">
+                {entryMode === 'projects' ? '我的项目' : '洞察研究'}
+              </h1>
+              <p className="mt-2 text-sm text-gray-400">
+                项目化管理澄清、洞察筛选、调研计划、人设、访谈与最终研究报告，支持随时退出后继续执行。
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-surface p-6">
+            <p className="mb-3 text-sm font-bold text-white">新建项目</p>
+            <textarea
+              value={newPrompt}
+              onChange={(event) => setNewPrompt(event.target.value)}
+              rows={4}
+              className="w-full resize-none rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-primary"
+              placeholder="输入你的业务问题、研究背景或希望探索的方向，系统会先帮助你澄清研究意图。"
+            />
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={createProject}
+                className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-bold text-black hover:bg-primary/90"
+              >
+                <Plus size={16} />
+                开始新的项目
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-bold text-white">项目列表</p>
+              <p className="text-xs text-gray-500">本地已保存 {projects.length} 个项目（存储 key：`{RESEARCH_PROJECTS_KEY}`）</p>
+            </div>
+            {projects.length === 0 ? (
+              <div className="rounded-2xl border border-white/10 bg-surface p-10 text-center text-sm text-gray-500">
+                还没有项目。输入问题后创建第一个项目即可开始。
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-4">
+                {projects.map((project) => {
+                  const topic = project.topicExplore.confirmedTopic;
+                  return (
+                    <div key={project.id} className="rounded-2xl border border-white/10 bg-surface p-5">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <h3 className="text-lg font-bold text-white">{project.title}</h3>
+                          <p className="mt-1 text-xs text-gray-500">
+                            更新时间：{formatProjectTime(project.updatedAt)}
+                          </p>
+                        </div>
+                        <span className="rounded-full border border-primary/25 bg-primary/10 px-2.5 py-1 text-[11px] text-primary">
+                          {projectStageLabel(project.stage)}
+                        </span>
+                      </div>
+                      <p className="mt-3 line-clamp-2 text-sm text-gray-300">
+                        {topic || project.initialPrompt || '尚未确认正式研究主题'}
+                      </p>
+                      <div className="mt-4 flex items-center justify-between">
+                        <button
+                          type="button"
+                          onClick={() => setActiveProjectId(project.id)}
+                          className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90"
+                        >
+                          从当前步骤继续
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeProject(project.id)}
+                          className="text-xs text-gray-500 hover:text-white"
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const currentIntentQuestion = activeProject.intentClarify.questions.find(
+    (question) => questionAnswer(question, activeProject.intentClarify.answers).length === 0,
+  );
+  const selectedPersona = activeProject.personaStage.personas.find(
+    (persona) => persona.id === activeProject.personaStage.detailPersonaId,
+  );
+
+  return (
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="border-b border-white/10 px-8 py-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <button
+              type="button"
+              onClick={exitProject}
+              className="mt-1 flex h-8 w-8 items-center justify-center rounded bg-surface-hover hover:bg-white/10"
+            >
+              <ArrowLeft size={16} />
+            </button>
+            <div className="space-y-3">
+              <div>
+                <h2 className="text-xl font-extrabold text-white">{activeProject.title}</h2>
+                <p className="mt-1 text-xs text-gray-500">
+                  当前阶段：{projectStageLabel(activeProject.stage)} · 最近更新 {formatProjectTime(activeProject.updatedAt)}
+                </p>
+              </div>
+              <ProjectStagePills stage={activeProject.stage} />
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={exitProject}
+            className="rounded-lg border border-white/15 px-4 py-2 text-sm text-gray-200 hover:bg-white/5"
+          >
+            退出并稍后继续
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-8">
+        <div className="mx-auto max-w-6xl">
+          {activeProject.stage === 'intentClarify' && (
+            <div className="space-y-6">
+              <div className="rounded-2xl border border-white/10 bg-surface p-6">
+                <p className="text-xs font-bold text-primary">步骤 1 / 澄清研究意图</p>
+                <h3 className="mt-2 text-2xl font-extrabold text-white">先确认这次研究到底要解决什么问题</h3>
+                <p className="mt-3 text-sm text-gray-300">
+                  初始输入：{activeProject.initialPrompt}
+                </p>
+              </div>
+
+              {activeProject.intentClarify.questions.map((question) => {
+                const selected = questionAnswer(question, activeProject.intentClarify.answers);
+                const answered = selected.length > 0;
+                return (
+                  <SelectionQuestion
+                    key={question.id}
+                    title={question.title}
+                    description={answered ? `已选择：${selected.join('、')}` : currentIntentQuestion?.id === question.id ? '请选择一项继续推进' : '等待前一题完成'}
+                    options={question.options}
+                    selected={selected}
+                    onChange={(next) =>
+                      updateProject(activeProject.id, (project) => ({
+                        ...project,
+                        intentClarify: {
+                          ...project.intentClarify,
+                          answers: {
+                            ...project.intentClarify.answers,
+                            [question.id]: next,
+                          },
+                        },
+                      }))
+                    }
+                  />
+                );
+              })}
+
+              {!currentIntentQuestion && (
+                <div className="rounded-2xl border border-primary/25 bg-primary/10 p-5">
+                  <p className="text-sm font-bold text-white">AI 已完成研究意图澄清</p>
+                  <pre className="mt-3 whitespace-pre-wrap text-sm text-gray-200 font-sans">{buildIntentSummary(activeProject)}</pre>
+                  <div className="mt-4 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateProject(activeProject.id, (project) => ({
+                          ...project,
+                          stage: 'fullTimeSourceSelect',
+                          intentClarify: {
+                            ...project.intentClarify,
+                            summary: buildIntentSummary(project),
+                            completed: true,
+                          },
+                        }))
+                      }
+                      className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90"
+                    >
+                      继续选择全时洞察范围
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeProject.stage === 'fullTimeSourceSelect' && (
+            <div className="space-y-6">
+              <div className="rounded-2xl border border-white/10 bg-surface p-6">
+                <p className="text-xs font-bold text-primary">步骤 2 / 全时洞察范围</p>
+                <h3 className="mt-2 text-2xl font-extrabold text-white">选择全时洞察信息源</h3>
+                <p className="mt-3 text-sm text-gray-400">所有交互都采用选择题。若本轮不需要全时洞察，请直接选择“完全不选”。</p>
+              </div>
+
+              <SelectionQuestion
+                title="全时洞察信息范围"
+                description="可多选；若选择“完全不选”，本轮将跳过全时洞察。"
+                options={['洞察报告库', '整车知识库', '行业知识库', '完全不选']}
+                selected={
+                  activeProject.fullTimeSource.mode === 'skip'
+                    ? ['完全不选']
+                    : [
+                        activeProject.fullTimeSource.knowledgeScopes.insightReport ? '洞察报告库' : '',
+                        activeProject.fullTimeSource.knowledgeScopes.vehicleKnowledge ? '整车知识库' : '',
+                        activeProject.fullTimeSource.knowledgeScopes.industryKnowledge ? '行业知识库' : '',
+                      ].filter(Boolean)
+                }
+                allowMultiple
+                onChange={(next) =>
+                  updateProject(activeProject.id, (project) => ({
+                    ...project,
+                    fullTimeSource: next.includes('完全不选')
+                      ? {
+                          ...project.fullTimeSource,
+                          mode: 'skip',
+                          knowledgeScopes: {
+                            insightReport: false,
+                            vehicleKnowledge: false,
+                            industryKnowledge: false,
+                          },
+                        }
+                      : {
+                          ...project.fullTimeSource,
+                          mode: 'custom',
+                          knowledgeScopes: {
+                            insightReport: next.includes('洞察报告库'),
+                            vehicleKnowledge: next.includes('整车知识库'),
+                            industryKnowledge: next.includes('行业知识库'),
+                          },
+                        },
+                  }))
+                }
+              />
+
+              <SelectionQuestion
+                title="垂媒检索是否开启"
+                description="仅在启用全时洞察时生效。"
+                options={['开启垂媒检索', '关闭垂媒检索']}
+                selected={[activeProject.fullTimeSource.onlineSearch ? '开启垂媒检索' : '关闭垂媒检索']}
+                onChange={(next) =>
+                  updateProject(activeProject.id, (project) => ({
+                    ...project,
+                    fullTimeSource: {
+                      ...project.fullTimeSource,
+                      onlineSearch: next[0] === '开启垂媒检索',
+                    },
+                  }))
+                }
+              />
+
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateProject(activeProject.id, (project) => ({
+                      ...project,
+                      stage: 'fullDomainSourceSelect',
+                      fullTimeSource: {
+                        ...project.fullTimeSource,
+                        completed: true,
+                      },
+                    }))
+                  }
+                  className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90"
+                >
+                  继续选择全域洞察范围
+                </button>
+              </div>
+            </div>
+          )}
+
+          {activeProject.stage === 'fullDomainSourceSelect' && (
+            <div className="space-y-6">
+              <div className="rounded-2xl border border-white/10 bg-surface p-6">
+                <p className="text-xs font-bold text-primary">步骤 3 / 全域洞察范围</p>
+                <h3 className="mt-2 text-2xl font-extrabold text-white">选择全域洞察信息源</h3>
+                <p className="mt-3 text-sm text-gray-400">完成本步后，无论是否选择全时/全域洞察，都会进入正式研究。</p>
+              </div>
+
+              <SelectionQuestion
+                title="全域洞察来源"
+                description="若本轮不需要全域洞察，请选择“完全不选”。"
+                options={['一方', '一方+三方', '完全不选']}
+                selected={[
+                  activeProject.fullDomainSource.mode === 'skip'
+                    ? '完全不选'
+                    : activeProject.fullDomainSource.source === 'firstParty'
+                      ? '一方'
+                      : '一方+三方',
+                ]}
+                onChange={(next) =>
+                  updateProject(activeProject.id, (project) => ({
+                    ...project,
+                    fullDomainSource:
+                      next[0] === '完全不选'
+                        ? {
+                            ...project.fullDomainSource,
+                            mode: 'skip',
+                          }
+                        : {
+                            ...project.fullDomainSource,
+                            mode: 'custom',
+                            source: next[0] === '一方' ? 'firstParty' : 'firstPlusThirdParty',
+                          },
+                  }))
+                }
+              />
+
+              <SelectionQuestion
+                title="时间范围"
+                options={['全部时间', '近一周', '近一月', '近三月', '近半年', '近一年']}
+                selected={[timeRangeLabel(activeProject.fullDomainSource.timeRange)]}
+                onChange={(next) => {
+                  const mapping = new Map([
+                    ['全部时间', 'all'],
+                    ['近一周', 'week'],
+                    ['近一月', 'month'],
+                    ['近三月', 'quarter'],
+                    ['近半年', 'halfYear'],
+                    ['近一年', 'year'],
+                  ] as const);
+                  updateProject(activeProject.id, (project) => ({
+                    ...project,
+                    fullDomainSource: {
+                      ...project.fullDomainSource,
+                      timeRange: (mapping.get(next[0]) ?? 'all') as ResearchProject['fullDomainSource']['timeRange'],
+                    },
+                  }));
+                }}
+              />
+
+              <div className="rounded-2xl border border-primary/25 bg-primary/10 p-5 text-sm text-gray-200">
+                <pre className="whitespace-pre-wrap font-sans">{buildSourceSummary(activeProject)}</pre>
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateProject(activeProject.id, (project) => ({
+                      ...project,
+                      stage: 'topicExplore',
+                      fullDomainSource: {
+                        ...project.fullDomainSource,
+                        completed: true,
+                      },
+                    }))
+                  }
+                  className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90"
+                >
+                  进入正式研究
+                </button>
+              </div>
+            </div>
+          )}
+
+          {activeProject.stage === 'topicExplore' && (
+            <div className="grid grid-cols-12 gap-6">
+              <div className="col-span-7 rounded-2xl border border-white/10 bg-surface p-6">
+                <p className="text-xs font-bold text-primary">步骤 4 / 正式研究主题确认</p>
+                <h3 className="mt-2 text-2xl font-extrabold text-white">AI 候选话题与对话确认</h3>
+                <div className="mt-4 space-y-4">
+                  {activeProject.topicExplore.messages.map((message) =>
+                    message.role === 'assistant' ? (
+                      <div key={message.id} className="flex gap-3">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary">
+                          <Bot size={18} className="text-black" />
+                        </div>
+                        <div className="flex-1">
+                          <p className="mb-1 text-[11px] text-gray-400">智能体</p>
+                          <div className="rounded-2xl border border-white/10 bg-surface-hover px-4 py-3">
+                            <pre className="whitespace-pre-wrap font-sans text-sm text-gray-200">{message.text}</pre>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div key={message.id} className="flex justify-end">
+                        <div className="max-w-2xl rounded-2xl bg-primary px-4 py-3 text-sm text-black">
+                          {message.text}
+                        </div>
+                      </div>
+                    ),
+                  )}
+                </div>
+                <div className="mt-6 rounded-2xl border border-white/10 bg-black/20 p-4">
+                  <textarea
+                    value={topicChatInput}
+                    onChange={(event) => setTopicChatInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault();
+                        if (!topicChatInput.trim()) return;
+                        const userText = topicChatInput.trim();
+                        updateProject(activeProject.id, (project) => ({
+                          ...project,
+                          topicExplore: {
+                            ...project.topicExplore,
+                            suggestions: [
+                              `${userText} 的决策动因与阻碍`,
+                              `${userText} 在关键人群中的差异`,
+                              `${userText} 的优先验证路径`,
+                            ],
+                            messages: [
+                              ...project.topicExplore.messages,
+                              { id: `user-${Date.now()}`, role: 'user', text: userText, createdAt: Date.now() },
+                              {
+                                id: `assistant-${Date.now() + 1}`,
+                                role: 'assistant',
+                                text: buildTopicReply(project, userText),
+                                createdAt: Date.now() + 1,
+                              },
+                            ],
+                          },
+                        }));
+                        setTopicChatInput('');
+                      }
+                    }}
+                    rows={4}
+                    className="w-full resize-none bg-transparent text-sm text-white outline-none"
+                    placeholder="继续和 AI 对话，协助明确正式研究主题..."
+                  />
+                  <div className="mt-3 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const userText = topicChatInput.trim();
+                        if (!userText) return;
+                        updateProject(activeProject.id, (project) => ({
+                          ...project,
+                          topicExplore: {
+                            ...project.topicExplore,
+                            suggestions: [
+                              `${userText} 的决策动因与阻碍`,
+                              `${userText} 在关键人群中的差异`,
+                              `${userText} 的优先验证路径`,
+                            ],
+                            messages: [
+                              ...project.topicExplore.messages,
+                              { id: `user-${Date.now()}`, role: 'user', text: userText, createdAt: Date.now() },
+                              {
+                                id: `assistant-${Date.now() + 1}`,
+                                role: 'assistant',
+                                text: buildTopicReply(project, userText),
+                                createdAt: Date.now() + 1,
+                              },
+                            ],
+                          },
+                        }));
+                        setTopicChatInput('');
+                      }}
+                      className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-black hover:bg-primary/90"
+                    >
+                      <Send size={16} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="col-span-5 space-y-4">
+                <div className="rounded-2xl border border-white/10 bg-surface p-6">
+                  <p className="text-sm font-bold text-white">候选研究主题</p>
+                  <div className="mt-4 space-y-3">
+                    {activeProject.topicExplore.suggestions.map((suggestion) => (
+                      <button
+                        key={suggestion}
+                        type="button"
+                        onClick={() =>
+                          updateProject(activeProject.id, (project) => ({
+                            ...project,
+                            topicExplore: {
+                              ...project.topicExplore,
+                              confirmedTopic: suggestion,
+                            },
+                          }))
+                        }
+                        className={`block w-full rounded-xl border px-4 py-3 text-left text-sm transition-colors ${
+                          activeProject.topicExplore.confirmedTopic === suggestion
+                            ? 'border-primary bg-primary/10 text-primary'
+                            : 'border-white/10 bg-white/5 text-gray-200 hover:bg-white/10'
+                        }`}
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-surface p-6">
+                  <p className="text-sm font-bold text-white">当前确认主题</p>
+                  <p className="mt-3 text-sm text-gray-300">
+                    {activeProject.topicExplore.confirmedTopic || '尚未确认'}
+                  </p>
+                  <div className="mt-4 flex justify-end">
+                    <button
+                      type="button"
+                      disabled={!activeProject.topicExplore.confirmedTopic}
+                      onClick={() =>
+                        updateProject(activeProject.id, (project) => ({
+                          ...project,
+                          stage: 'plan',
+                        }))
+                      }
+                      className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      生成调研计划
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeProject.stage === 'plan' && (
+            <div className="space-y-6">
+              <div className="rounded-2xl border border-white/10 bg-surface p-6">
+                <p className="text-xs font-bold text-primary">步骤 5 / 调研计划</p>
+                <h3 className="mt-2 text-2xl font-extrabold text-white">确认正式调研计划</h3>
+              </div>
+
+              {activeProject.planStage.plan && (
+                <div className="rounded-2xl border border-white/10 bg-white p-8 text-black shadow-xl">
+                  <div className="border-b border-zinc-200 pb-4">
+                    <h4 className="text-2xl font-extrabold">{activeProject.topicExplore.confirmedTopic} 调研计划</h4>
+                    <p className="mt-2 text-sm text-zinc-600">{activeProject.planStage.plan.summary}</p>
+                  </div>
+                  <div className="mt-6 grid grid-cols-2 gap-6 text-sm">
+                    <section>
+                      <p className="mb-2 font-bold">研究目标</p>
+                      <ul className="space-y-2 text-zinc-700">
+                        {activeProject.planStage.plan.objectives.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </section>
+                    <section>
+                      <p className="mb-2 font-bold">研究方法</p>
+                      <ul className="space-y-2 text-zinc-700">
+                        {activeProject.planStage.plan.methods.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </section>
+                    <section>
+                      <p className="mb-2 font-bold">样本规则</p>
+                      <ul className="space-y-2 text-zinc-700">
+                        {activeProject.planStage.plan.sampleRules.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </section>
+                    <section>
+                      <p className="mb-2 font-bold">预期产出</p>
+                      <ul className="space-y-2 text-zinc-700">
+                        {activeProject.planStage.plan.outputs.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </section>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateProject(activeProject.id, (project) => ({
+                      ...project,
+                      planStage: {
+                        plan: buildResearchPlan(project),
+                        confirmed: false,
+                      },
+                    }))
+                  }
+                  className="rounded-lg border border-white/15 px-4 py-2 text-sm text-gray-200 hover:bg-white/5"
+                >
+                  重新生成
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateProject(activeProject.id, (project) => ({
+                      ...project,
+                      stage: 'persona',
+                      planStage: {
+                        ...project.planStage,
+                        confirmed: true,
+                      },
+                    }))
+                  }
+                  className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90"
+                >
+                  确认计划并匹配人设
+                </button>
+              </div>
+            </div>
+          )}
+
+          {activeProject.stage === 'persona' && (
+            <div className="space-y-6">
+              <div className="rounded-2xl border border-white/10 bg-surface p-6">
+                <p className="text-xs font-bold text-primary">步骤 6 / 访谈人设</p>
+                <h3 className="mt-2 text-2xl font-extrabold text-white">确认访谈人设（固定 20 个）</h3>
+                <p className="mt-3 text-sm text-gray-400">
+                  当前共 {activeProject.personaStage.personas.length} 个候选人设，其中 CDP 命中 {activeProject.personaStage.matchedFromCdp} 个，社媒拟合补足 {activeProject.personaStage.supplementedFromSocial} 个。
+                </p>
+              </div>
+
+              <div className="flex justify-between gap-4 rounded-2xl border border-white/10 bg-surface p-5">
+                <div className="text-sm text-gray-300">
+                  <p>若用户不满意，可重新筛选或调整标签后再次生成。系统会始终把最终总人数控制在 20 个以内。</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPersonaFiltersOpen(true)}
+                  className="rounded-lg border border-white/15 px-4 py-2 text-sm text-gray-200 hover:bg-white/5"
+                >
+                  二次筛选/调整
+                </button>
+              </div>
+
+              {selectedPersona ? (
+                <div className="space-y-4">
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateProject(activeProject.id, (project) => ({
+                          ...project,
+                          personaStage: {
+                            ...project.personaStage,
+                            detailPersonaId: null,
+                          },
+                        }))
+                      }
+                      className="text-sm text-gray-400 hover:text-white"
+                    >
+                      返回人设列表
+                    </button>
+                  </div>
+                  <PersonaDetailView persona={selectedPersona} showContinueChat={false} />
+                </div>
+              ) : (
+                <div className="grid grid-cols-4 gap-4">
+                  {activeProject.personaStage.personas.map((persona) => (
+                    <button
+                      key={persona.id}
+                      type="button"
+                      onClick={() =>
+                        updateProject(activeProject.id, (project) => ({
+                          ...project,
+                          personaStage: {
+                            ...project.personaStage,
+                            detailPersonaId: persona.id,
+                          },
+                        }))
+                      }
+                      className="rounded-2xl border border-white/10 bg-surface p-4 text-left hover:bg-white/5"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <h4 className="text-lg font-bold text-white">{persona.cardTitle}</h4>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] ${
+                            persona.sourcePool === 'cdp' ? 'bg-primary/15 text-primary' : 'bg-blue-500/15 text-blue-300'
+                          }`}
+                        >
+                          {persona.sourcePool === 'cdp' ? 'CDP' : '社媒'}
+                        </span>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {persona.tags.map((tag) => (
+                          <span key={tag} className="rounded bg-blue-500/20 px-2 py-1 text-xs text-blue-300">
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                      <div className="mt-4 space-y-2 text-xs text-gray-400">
+                        <div className="flex items-center justify-between">
+                          <span>综合评分</span>
+                          <span className="text-white">{persona.score.toFixed(1)} / 10</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span>置信度</span>
+                          <span className="text-white">{persona.conf}%</span>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateProject(activeProject.id, (project) => ({
+                      ...project,
+                      stage: 'interviewOutline',
+                      personaStage: {
+                        ...project.personaStage,
+                        confirmed: true,
+                      },
+                    }))
+                  }
+                  className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90"
+                >
+                  确认这 20 个人设并生成访谈大纲
+                </button>
+              </div>
+            </div>
+          )}
+
+          {activeProject.stage === 'interviewOutline' && (
+            <div className="space-y-6">
+              <div className="rounded-2xl border border-white/10 bg-surface p-6">
+                <p className="text-xs font-bold text-primary">步骤 7 / 访谈大纲</p>
+                <h3 className="mt-2 text-2xl font-extrabold text-white">修订并确认访谈大纲</h3>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-surface p-6">
+                <textarea
+                  value={outlineDraft}
+                  onChange={(event) => setOutlineDraft(event.target.value)}
+                  rows={24}
+                  className="w-full resize-none rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-gray-100 outline-none focus:border-primary"
+                />
+              </div>
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setOutlineDraft(buildInterviewOutline(activeProject))}
+                  className="rounded-lg border border-white/15 px-4 py-2 text-sm text-gray-200 hover:bg-white/5"
+                >
+                  重新生成
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateProject(activeProject.id, (project) => ({
+                      ...project,
+                      stage: 'materialUpload',
+                      interviewOutlineStage: {
+                        outline: outlineDraft,
+                        confirmed: true,
+                      },
+                    }))
+                  }
+                  className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90"
+                >
+                  确认访谈大纲并进入执行
+                </button>
+              </div>
+            </div>
+          )}
+
+          {activeProject.stage === 'materialUpload' && (
+            <div className="space-y-6">
+              <div className="rounded-2xl border border-white/10 bg-surface p-6">
+                <p className="text-xs font-bold text-primary">步骤 8 / 补充访谈资料</p>
+                <h3 className="mt-2 text-2xl font-extrabold text-white">可选上传线下真人访谈资料</h3>
+                <p className="mt-3 text-sm text-gray-400">如果暂时没有线下资料，可直接跳过，系统会基于已有信息生成最终研究报告。</p>
+              </div>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                multiple
+                accept=".pdf,.doc,.docx,.txt"
+                onChange={(event) => {
+                  const files = Array.from(event.target.files ?? []);
+                  if (files.length === 0) return;
+                  const uploaded: UploadedMaterial[] = files.map((file) => ({
+                    id: `file-${Date.now()}-${file.name}`,
+                    name: file.name,
+                    sizeLabel: formatBytes(file.size),
+                    uploadedAt: Date.now(),
+                  }));
+                  updateProject(activeProject.id, (project) => ({
+                    ...project,
+                    materialUploadStage: {
+                      ...project.materialUploadStage,
+                      files: [...project.materialUploadStage.files, ...uploaded],
+                      skipped: false,
+                    },
+                  }));
+                  event.target.value = '';
+                }}
+              />
+
+              <div className="rounded-2xl border border-dashed border-white/15 bg-surface p-10 text-center">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90"
+                >
+                  上传访谈资料
+                </button>
+                <p className="mt-3 text-xs text-gray-500">支持 PDF、Word、TXT；这里只保存文件元信息用于流程演示。</p>
+              </div>
+
+              <div className="space-y-3">
+                {activeProject.materialUploadStage.files.map((file) => (
+                  <div key={file.id} className="flex items-center justify-between rounded-xl border border-white/10 bg-surface p-4 text-sm">
+                    <div>
+                      <p className="font-medium text-white">{file.name}</p>
+                      <p className="text-xs text-gray-500">{file.sizeLabel} · 上传于 {formatProjectTime(file.uploadedAt)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateProject(activeProject.id, (project) => ({
+                      ...project,
+                      stage: 'report',
+                      materialUploadStage: {
+                        ...project.materialUploadStage,
+                        skipped: true,
+                      },
+                    }))
+                  }
+                  className="rounded-lg border border-white/15 px-4 py-2 text-sm text-gray-200 hover:bg-white/5"
+                >
+                  跳过并生成报告
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateProject(activeProject.id, (project) => ({
+                      ...project,
+                      stage: 'report',
+                    }))
+                  }
+                  className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90"
+                >
+                  继续生成最终报告
+                </button>
+              </div>
+            </div>
+          )}
+
+          {activeProject.stage === 'report' && (
+            <div className="space-y-6">
+              <div className="rounded-2xl border border-white/10 bg-surface p-6">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-bold text-primary">步骤 9 / 最终研究报告</p>
+                    <h3 className="mt-2 text-2xl font-extrabold text-white">整合输出最终研究报告</h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateProject(activeProject.id, (project) => ({
+                        ...project,
+                        reportStage: {
+                          report: buildFinalReport(project),
+                          generatedAt: Date.now(),
+                        },
+                      }))
+                    }
+                    className="rounded-lg border border-white/15 px-4 py-2 text-sm text-gray-200 hover:bg-white/5"
+                  >
+                    重新生成
+                  </button>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white p-8 text-black shadow-2xl">
+                <div className="border-b border-zinc-200 pb-4">
+                  <div className="flex items-center gap-2 text-sm text-zinc-600">
+                    <FileText className="h-4 w-4" />
+                    PDF 风格预览
+                  </div>
+                  <h4 className="mt-3 text-3xl font-black">{activeProject.topicExplore.confirmedTopic} 研究报告</h4>
+                  <p className="mt-2 text-sm text-zinc-500">
+                    生成时间：{formatProjectTime(activeProject.reportStage.generatedAt ?? Date.now())}
+                  </p>
+                </div>
+                <div className="mt-6 whitespace-pre-wrap text-sm leading-7 text-zinc-800">
+                  {activeProject.reportStage.report}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-5 text-sm text-emerald-200">
+                <div className="flex items-center gap-2 font-bold">
+                  <CheckCircle2 className="h-4 w-4" />
+                  项目已可随时再次打开、补充资料并重新生成报告
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {personaFiltersOpen && activeProject && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-8">
+          <div className="w-full max-w-5xl rounded-2xl border border-white/10 bg-surface">
+            <div className="sticky top-0 flex items-center justify-between border-b border-white/10 bg-surface px-6 py-4">
+              <div>
+                <p className="text-lg font-bold text-white">二次筛选与调整人设</p>
+                <p className="text-xs text-gray-500">选择标签后重新生成 20 个访谈人设</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPersonaFiltersOpen(false)}
+                className="text-sm text-gray-400 hover:text-white"
+              >
+                关闭
+              </button>
+            </div>
+            <div className="space-y-5 p-6">
+              <PersonaCdpTagFilterPanel selectedTagValues={personaFilterValues} onChange={setPersonaFilterValues} />
+              {Object.keys(personaFilterValues).length > 0 && (
+                <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                  <p className="mb-2 text-xs text-gray-500">已选标签</p>
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(personaFilterValues).map(([key, value]) => (
+                      <span key={key} className="rounded border border-primary/20 bg-primary/10 px-2 py-1 text-xs text-primary">
+                        {cdpFieldLabelMap.get(key) ?? key}：{value}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-3 border-t border-white/10 px-6 py-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setPersonaFilterValues({});
+                  setPersonaFiltersOpen(false);
+                }}
+                className="rounded-lg border border-white/15 px-4 py-2 text-sm text-gray-200 hover:bg-white/5"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const built = buildPersonaCandidates(activeProject, personaFilterValues);
+                  updateProject(activeProject.id, (project) => ({
+                    ...project,
+                    personaStage: {
+                      ...project.personaStage,
+                      personas: built.personas,
+                      matchedFromCdp: built.matchedFromCdp,
+                      supplementedFromSocial: built.supplementedFromSocial,
+                      selectedPersonaIds: built.personas.map((persona) => persona.id),
+                      detailPersonaId: null,
+                      confirmed: false,
+                    },
+                  }));
+                  setPersonaFiltersOpen(false);
+                }}
+                className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-black hover:bg-primary/90"
+              >
+                应用筛选并重新生成 20 人设
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
